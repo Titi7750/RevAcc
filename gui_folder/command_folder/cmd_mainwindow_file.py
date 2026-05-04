@@ -30,6 +30,8 @@ class CmdMainWindowClass(GuiMainWindowClass):
         super().__init__()
 
         self.connect_events_method()
+        self.change_page_method(0, self.button_dashboard)
+
         self.load_fake_data_method()
 
         return None
@@ -40,12 +42,12 @@ class CmdMainWindowClass(GuiMainWindowClass):
         """ CMD Main Window Class: Connect events method """
 
         # Navigation
-        self.button_dashboard.clicked.connect(lambda: self.pages.setCurrentIndex(0))
-        self.button_import.clicked.connect(lambda: self.pages.setCurrentIndex(1))
-        self.button_mapping.clicked.connect(lambda: self.pages.setCurrentIndex(2))
-        self.button_calcul.clicked.connect(lambda: self.pages.setCurrentIndex(3))
-        self.button_resultats.clicked.connect(lambda: self.pages.setCurrentIndex(4))
-        self.button_anomalies.clicked.connect(lambda: self.pages.setCurrentIndex(5))
+        self.button_dashboard.clicked.connect(lambda: self.change_page_method(0, self.button_dashboard))
+        self.button_import.clicked.connect(lambda: self.change_page_method(1, self.button_import))
+        self.button_mapping.clicked.connect(lambda: self.change_page_method(2, self.button_mapping))
+        self.button_calculation.clicked.connect(lambda: self.change_page_method(3, self.button_calculation))
+        self.button_result.clicked.connect(lambda: self.change_page_method(4, self.button_result))
+        self.button_anomalies.clicked.connect(lambda: self.change_page_method(5, self.button_anomalies))
 
         # Import
         self.button_import_transactions.clicked.connect(
@@ -63,6 +65,33 @@ class CmdMainWindowClass(GuiMainWindowClass):
 
         # Export
         self.button_export_results.clicked.connect(self.export_result_method)
+
+        return None
+
+    # -----
+
+    def change_page_method(self, param_page_index: int, param_active_button) -> None:
+        """ CMD Main Window Class: Change page method """
+
+        self.pages.setCurrentIndex(param_page_index)
+
+        menu_buttons = [
+            self.button_dashboard,
+            self.button_import,
+            self.button_mapping,
+            self.button_calculation,
+            self.button_result,
+            self.button_anomalies
+        ]
+
+        for button in menu_buttons:
+            button.setProperty("active", False)
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+        param_active_button.setProperty("active", True)
+        param_active_button.style().unpolish(param_active_button)
+        param_active_button.style().polish(param_active_button)
 
         return None
 

@@ -38,9 +38,10 @@ QPushButton#menuButton:hover {
     color: #FFFFFF;
 }
 
-QPushButton#menuButton:pressed {
+QPushButton#menuButton[active="true"] {
     background-color: #f37c20;
     color: #FFFFFF;
+    font-weight: 700;
 }
 
 /* TITLES */

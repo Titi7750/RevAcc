@@ -88,8 +88,8 @@ class GuiMainWindowClass(QMainWindow):
         self.button_dashboard = QPushButton("Tableau de bord")
         self.button_import = QPushButton("Import")
         self.button_mapping = QPushButton("Mapping")
-        self.button_calcul = QPushButton("Calcul")
-        self.button_resultats = QPushButton("Résultats")
+        self.button_calculation = QPushButton("Calcul")
+        self.button_result = QPushButton("Résultats")
         self.button_anomalies = QPushButton("Anomalies")
 
         self.sidebar_layout.addWidget(self.logo_label)
@@ -99,8 +99,8 @@ class GuiMainWindowClass(QMainWindow):
             self.button_dashboard,
             self.button_import,
             self.button_mapping,
-            self.button_calcul,
-            self.button_resultats,
+            self.button_calculation,
+            self.button_result,
             self.button_anomalies
         ]:
             button.setObjectName("menuButton")
@@ -120,15 +120,15 @@ class GuiMainWindowClass(QMainWindow):
         self.page_dashboard = self.create_dashboard_page_method()
         self.page_import = self.create_import_page_method()
         self.page_mapping = self.create_mapping_page_method()
-        self.page_calcul = self.create_calculation_page_method()
-        self.page_resultats = self.create_result_page_method()
+        self.page_calculation = self.create_calculation_page_method()
+        self.page_result = self.create_result_page_method()
         self.page_anomalies = self.create_anomalie_page_method()
 
         self.pages.addWidget(self.page_dashboard)
         self.pages.addWidget(self.page_import)
         self.pages.addWidget(self.page_mapping)
-        self.pages.addWidget(self.page_calcul)
-        self.pages.addWidget(self.page_resultats)
+        self.pages.addWidget(self.page_calculation)
+        self.pages.addWidget(self.page_result)
         self.pages.addWidget(self.page_anomalies)
 
         return None
