@@ -8,6 +8,8 @@ import os
 ## None
 
 # Import modules from third party packages
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QMainWindow
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtWidgets import QLabel
@@ -85,6 +87,26 @@ class GuiMainWindowClass(QMainWindow):
         self.logo_label = QLabel("RevAcc")
         self.logo_label.setObjectName("logoLabel")
 
+        self.logo_entegra = QLabel()
+        self.logo_entegra.setPixmap(
+            QPixmap(
+                os.path.join(
+                    os.getcwd(),
+                    "gui_folder",
+                    "resources_folder",
+                    "icons_folder",
+                    "logo-entegra.png"
+                )
+            ).scaled(
+                140,
+                60,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+        )
+        self.logo_entegra.setObjectName("logoEntegra")
+        self.logo_entegra.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         self.button_dashboard = QPushButton("Tableau de bord")
         self.button_import = QPushButton("Import")
         self.button_mapping = QPushButton("Mapping")
@@ -107,6 +129,7 @@ class GuiMainWindowClass(QMainWindow):
             self.sidebar_layout.addWidget(button)
 
         self.sidebar_layout.addStretch()
+        self.sidebar_layout.addWidget(self.logo_entegra)
 
         return None
 
