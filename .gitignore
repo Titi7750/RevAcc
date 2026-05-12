@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# VS Code settings
+.vscode/
