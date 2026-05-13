@@ -46,7 +46,7 @@ CREATE TABLE `product` (
     `fk_id_brand`    INT NOT NULL,
     `fk_id_category` INT NOT NULL,
     `product_name`   VARCHAR(255) NOT NULL,
-    `description`    TEXT,
+    `description`    TEXT NULL,
     `unit`           VARCHAR(50) NOT NULL,
     PRIMARY KEY (`id_product`),
     FOREIGN KEY (`fk_id_brand`)
@@ -66,7 +66,6 @@ CREATE TABLE `agreement` (
     `id_agreement`      INT NOT NULL AUTO_INCREMENT,
     `fk_id_brand`       INT NOT NULL,
     `fk_id_category`    INT NOT NULL,
-    `fk_id_distributor` INT NOT NULL,
     `fk_id_industrial`  INT NOT NULL,
     `start_date`        DATE NULL,
     `end_date`          DATE NULL,
@@ -76,9 +75,6 @@ CREATE TABLE `agreement` (
         ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_category`)
         REFERENCES `category`(`id_category`)
-        ON DELETE CASCADE ON UPDATE CASCADE,
-    FOREIGN KEY (`fk_id_distributor`)
-        REFERENCES `distributor`(`id_distributor`)
         ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_industrial`)
         REFERENCES `industrial`(`id_industrial`)
