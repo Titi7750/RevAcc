@@ -14,10 +14,12 @@ Industriel → (accord de reversement) → Entegra → (négociation) → Distri
 
 ```
 brand ──────────────────────────────┬──▶ product
+unit ───────────────────────────────┤
 category ───────────────────────────┘
 
 brand ──────────────────────────────┬──▶ agreement ──▶ agreement_tier
 category ───────────────────────────┤
+unit ───────────────────────────────┤
 industrial ─────────────────────────┘
 
 product ─────────────────────────────┬──▶ transaction
