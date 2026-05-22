@@ -81,6 +81,16 @@ Référentiel des industriels / fournisseurs (ex: Unilever FoodSolutions).
 
 ---
 
+### `unit`
+Référentiel des unités de vente (ex: kg, carton, litre).
+
+| Colonne | Type | Contrainte | Description |
+|---|---|---|---|
+| `id_unit` | INT | PK, AUTO_INCREMENT | Identifiant unique |
+| `unit_name` | VARCHAR(255) | NOT NULL | Nom de l'unité |
+
+---
+
 ### `product`
 Produits commercialisés, rattachés à une marque et une catégorie.
 
@@ -91,9 +101,10 @@ Produits commercialisés, rattachés à une marque et une catégorie.
 | `id_product` | INT | PK, AUTO_INCREMENT | Identifiant unique |
 | `fk_id_brand` | INT | FK → `brand` | Marque du produit |
 | `fk_id_category` | INT | FK → `category` | Catégorie du produit |
+| `fk_id_unit` | INT | FK → `unit` | Unité de vente |
 | `product_name` | VARCHAR(255) | NOT NULL | Nom du produit |
+| `product_code` | VARCHAR(255) | NOT NULL | Code du produit |
 | `description` | TEXT | NULL | Description libre |
-| `unit` | VARCHAR(50) | NOT NULL | Unité de vente (ex: kg, carton) |
 
 ---
 
@@ -108,6 +119,7 @@ Accord de reversement entre un industriel et **Entegra**, pour une marque et une
 | `fk_id_brand` | INT | FK → `brand` | Marque concernée |
 | `fk_id_category` | INT | FK → `category` | Catégorie concernée |
 | `fk_id_industrial` | INT | FK → `industrial` | Industriel signataire |
+| `fk_id_unit` | INT | FK → `unit` | Unité de vente pour les paliers |
 | `start_date` | DATE | NULL | Date de début de l'accord |
 | `end_date` | DATE | NULL | Date de fin de l'accord |
 

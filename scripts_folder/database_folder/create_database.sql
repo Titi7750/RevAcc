@@ -36,6 +36,13 @@ CREATE TABLE `industrial` (
     PRIMARY KEY (`id_industrial`)
 ) ENGINE=InnoDB;
 
+DROP TABLE IF EXISTS `unit`;
+CREATE TABLE `unit` (
+    `id_unit`   INT NOT NULL AUTO_INCREMENT,
+    `unit_name` VARCHAR(255) NOT NULL,
+    PRIMARY KEY (`id_unit`)
+) ENGINE=InnoDB;
+
 -- ------------------------------------------------------------
 -- Product
 -- ------------------------------------------------------------
@@ -45,15 +52,19 @@ CREATE TABLE `product` (
     `id_product`     INT NOT NULL AUTO_INCREMENT,
     `fk_id_brand`    INT NOT NULL,
     `fk_id_category` INT NOT NULL,
+    `fk_id_unit`     INT NOT NULL,
     `product_name`   VARCHAR(255) NOT NULL,
+    `product_code`   VARCHAR(255) NOT NULL,
     `description`    TEXT NULL,
-    `unit`           VARCHAR(50) NOT NULL,
     PRIMARY KEY (`id_product`),
     FOREIGN KEY (`fk_id_brand`)
         REFERENCES `brand`(`id_brand`)
         ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_category`)
         REFERENCES `category`(`id_category`)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`fk_id_unit`)
+        REFERENCES `unit`(`id_unit`)
         ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
@@ -67,6 +78,7 @@ CREATE TABLE `agreement` (
     `fk_id_brand`       INT NOT NULL,
     `fk_id_category`    INT NOT NULL,
     `fk_id_industrial`  INT NOT NULL,
+    `fk_id_unit`        INT NOT NULL,
     `start_date`        DATE NULL,
     `end_date`          DATE NULL,
     PRIMARY KEY (`id_agreement`),
@@ -78,6 +90,9 @@ CREATE TABLE `agreement` (
         ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_industrial`)
         REFERENCES `industrial`(`id_industrial`)
+        ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`fk_id_unit`)
+        REFERENCES `unit`(`id_unit`)
         ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
