@@ -54,7 +54,7 @@ CREATE TABLE `product` (
     `fk_id_category` INT NOT NULL,
     `fk_id_unit`     INT NOT NULL,
     `product_name`   VARCHAR(255) NOT NULL,
-    `product_code`   VARCHAR(255) NOT NULL,
+    `product_code`   VARCHAR(255) NULL,
     `description`    TEXT NULL,
     PRIMARY KEY (`id_product`),
     FOREIGN KEY (`fk_id_brand`)
