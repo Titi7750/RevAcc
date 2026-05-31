@@ -115,6 +115,7 @@ QPushButton#primaryButton:pressed {
 /* TABLES */
 QTableWidget {
     background-color: #FFFFFF;
+    color: #2D2433;
     border: 1px solid #E7E2EA;
     border-radius: 12px;
     gridline-color: #E7E2EA;
@@ -142,26 +143,53 @@ QTableCornerButton::section {
     border-bottom: 1px solid #E7E2EA;
 }
 
-/* LISTS */
-QListWidget {
-    background-color: #FFFFFF;
+/* TABS */
+QTabWidget {
+    background-color: #F8FAFC;
+}
+
+QTabWidget::pane {
+    background-color: #F8FAFC;
     border: 1px solid #E7E2EA;
     border-radius: 12px;
-    padding: 8px;
 }
 
-QListWidget::item {
-    padding: 10px;
-    border-radius: 8px;
+QTabBar {
+    background-color: #F8FAFC;
 }
 
-QListWidget::item:hover {
+QTabBar::tab {
     background-color: #F7F4F9;
+    color: #43364c;
+    padding: 10px 16px;
+    margin-right: 6px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 
-QListWidget::item:selected {
+QTabBar::tab:hover {
+    background-color: #F2ECF6;
+}
+
+QTabBar::tab:selected {
     background-color: #f37c20;
     color: #FFFFFF;
+}
+
+QMainWindow#floatingConsultationWindow {
+    background-color: #F8FAFC;
+}
+
+QTextEdit {
+    background-color: #FFFFFF;
+    color: #2D2433;
+    border: 1px solid #E7E2EA;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+QTextEdit:focus {
+    border: 1px solid #f37c20;
 }
 
 /* PROGRESS BAR */

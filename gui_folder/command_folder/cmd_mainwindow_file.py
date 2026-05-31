@@ -47,18 +47,16 @@ class CmdMainWindowClass(GuiMainWindowClass):
         self.button_mapping.clicked.connect(lambda: self.change_page_method(2, self.button_mapping))
         self.button_calculation.clicked.connect(lambda: self.change_page_method(3, self.button_calculation))
         self.button_result.clicked.connect(lambda: self.change_page_method(4, self.button_result))
-        self.button_anomalies.clicked.connect(lambda: self.change_page_method(5, self.button_anomalies))
+        self.button_consultation.clicked.connect(lambda: self.change_page_method(5, self.button_consultation))
 
         # Import
-        self.button_import_transactions.clicked.connect(
-            lambda: self.import_file_method("Transactions")
-        )
         self.button_import_produits.clicked.connect(
             lambda: self.import_file_method("Produits")
         )
         self.button_import_accords.clicked.connect(
             lambda: self.import_file_method("Accords")
         )
+        self.button_export_accords_template.clicked.connect(self.export_accords_template_method)
 
         # Calcul
         self.button_start_calculation.clicked.connect(self.run_calculation_method)
@@ -81,7 +79,7 @@ class CmdMainWindowClass(GuiMainWindowClass):
             self.button_mapping,
             self.button_calculation,
             self.button_result,
-            self.button_anomalies
+            self.button_consultation
         ]
 
         for button in menu_buttons:
@@ -116,6 +114,7 @@ class CmdMainWindowClass(GuiMainWindowClass):
         self.table_imports.setItem(row, 0, QTableWidgetItem(param_file_type))
         self.table_imports.setItem(row, 1, QTableWidgetItem(file_path))
         self.table_imports.setItem(row, 2, QTableWidgetItem("Importé"))
+        self.table_imports.setItem(row, 3, QTableWidgetItem("Prêt à être contrôlé"))
 
         QMessageBox.information(
             self,
@@ -131,8 +130,9 @@ class CmdMainWindowClass(GuiMainWindowClass):
         """ CMD Main Window Class: Load fake data method """
 
         self.load_fake_mapping_method()
+        self.load_fake_consultation_method()
+        self.load_fake_imports_method()
         self.load_fake_results_method()
-        self.load_fake_anomalies_method()
         self.update_dashboard_method()
 
         return None
@@ -167,10 +167,10 @@ class CmdMainWindowClass(GuiMainWindowClass):
         """ CMD Main Window Class: Load fake results method """
 
         data = [
-            ["Coca-Cola", "Avril 2026", "52 000 €", "5 %", "2 600 €"],
-            ["Nestlé", "Avril 2026", "38 400 €", "4 %", "1 536 €"],
-            ["Danone", "Avril 2026", "61 200 €", "3,5 %", "2 142 €"],
-            ["PepsiCo", "Avril 2026", "29 800 €", "5 %", "1 490 €"],
+            ["Coca-Cola", "Avril 2026", "52 000 €", "5 %", "2 600 €", "52 000 × 5 % = 2 600 €"],
+            ["Nestlé", "Avril 2026", "38 400 €", "4 %", "1 536 €", "38 400 × 4 % = 1 536 €"],
+            ["Danone", "Avril 2026", "61 200 €", "3,5 %", "2 142 €", "61 200 × 3,5 % = 2 142 €"],
+            ["PepsiCo", "Avril 2026", "29 800 €", "5 %", "1 490 €", "29 800 × 5 % = 1 490 €"],
         ]
 
         self.table_resultats.setRowCount(len(data))
@@ -183,26 +183,78 @@ class CmdMainWindowClass(GuiMainWindowClass):
                     QTableWidgetItem(value)
                 )
 
+        self.calculation_details.setPlainText(
+            "1. Import des transactions\n"
+            "2. Contrôle du mapping produit\n"
+            "3. Vérification des accords\n"
+            "4. Calcul du revenu ligne par ligne\n"
+            "5. Génération de l'export détaillé"
+        )
+
         return None
 
     # -----
 
-    def load_fake_anomalies_method(self) -> None:
-        """ CMD Main Window Class: Load fake anomalies method """
+    def load_fake_consultation_method(self) -> None:
+        """ CMD Main Window Class: Load fake consultation data method """
 
-        anomalies = [
-            "Produit inconnu : Produit inconnu ABC",
-            "Unité non reconnue : carton_12btl",
-            "Accord manquant : Supplier ID 458",
-            "Doublon transaction : TX-2026-0418",
+        products = [
+            ["P-001", "Coca-Cola 24x33cl", "Coca-Cola 33cl", "À vérifier", "Corriger"],
+            ["P-002", "Sprite Zero 12x50cl", "Sprite Zero 50cl", "OK", "Voir"],
+            ["P-003", "Evian Pack 6x1L", "Evian 1L", "OK", "Voir"],
+            ["P-004", "Produit inconnu ABC", "", "Non mappé", "Mapper"],
         ]
 
-        self.list_anomalies.clear()
-        self.list_anomalies.addItems(anomalies)
+        accords = [
+            ["A-100", "Coca-Cola Europacific", "Coca-Cola 33cl", "Avril 2026", "5 %", "Actif"],
+            ["A-101", "Nestlé Waters", "Evian 1L", "Avril 2026", "4 %", "Actif"],
+            ["A-102", "PepsiCo France", "Pepsi", "Avril 2026", "3,5 %", "À corriger"],
+            ["A-103", "Danone", "Danone", "Avril 2026", "2,5 %", "Actif"],
+        ]
+
+        self.table_consult_products.setRowCount(len(products))
+        for row_index, row_data in enumerate(products):
+            for col_index, value in enumerate(row_data):
+                self.table_consult_products.setItem(row_index, col_index, QTableWidgetItem(value))
+
+        self.table_consult_accords.setRowCount(len(accords))
+        for row_index, row_data in enumerate(accords):
+            for col_index, value in enumerate(row_data):
+                self.table_consult_accords.setItem(row_index, col_index, QTableWidgetItem(value))
+
+        self.product_dock_output.setPlainText(
+            "Produit sélectionné :\n"
+            "- Vérification du mapping\n"
+            "- Correction directe si nécessaire\n"
+            "- Règle de correspondance appliquée"
+        )
+
+        self.accord_dock_output.setPlainText(
+            "Accord sélectionné :\n"
+            "- Contrôle du fournisseur\n"
+            "- Vérification du taux\n"
+            "- Cohérence produit / période / statut"
+        )
 
         return None
 
-    # ----- END OF FUNCTIONS TEMPORARY -----
+    # -----
+
+    def load_fake_imports_method(self) -> None:
+        """ CMD Main Window Class: Load fake imports overview method """
+
+        imports = [
+            ["Produits", "mapping_produits.xlsx", "Importé", "Base de travail pour le mapping"],
+            ["Accords", "accords_exemple.xlsx", "Importé", "Modèle de référence pour les imports"],
+            ["Transactions", "transactions_mensuelles.xlsx", "Importé", "Source du calcul"],
+        ]
+
+        self.table_imports.setRowCount(len(imports))
+        for row_index, row_data in enumerate(imports):
+            for col_index, value in enumerate(row_data):
+                self.table_imports.setItem(row_index, col_index, QTableWidgetItem(value))
+
+        return None
 
     def update_dashboard_method(self) -> None:
         """ CMD Main Window Class: Update dashboard method """
@@ -210,9 +262,7 @@ class CmdMainWindowClass(GuiMainWindowClass):
         self.kpi_revenus.value_label.setText("7 768 €")
         self.kpi_accords.value_label.setText("42")
         self.kpi_produits.value_label.setText("1 284")
-        self.kpi_anomalies.value_label.setText(
-            str(self.list_anomalies.count())
-        )
+        self.kpi_consultations.value_label.setText("4")
 
         return None
 
@@ -230,6 +280,7 @@ class CmdMainWindowClass(GuiMainWindowClass):
             QApplication.processEvents()
 
         self.label_calcul_status.setText("Calcul terminé avec succès.")
+        self.calculation_details.append("Export détaillé prêt à être généré.")
         self.update_dashboard_method()
 
         QMessageBox.information(
@@ -243,12 +294,12 @@ class CmdMainWindowClass(GuiMainWindowClass):
     # -----
 
     def export_result_method(self) -> None:
-        """ CMD Main Window Class: Export results method """
+        """ CMD Main Window Class: Export calculation details method """
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Exporter les résultats",
-            "resultats_revacc.xlsx",
+            "Exporter le calcul détaillé",
+            "calcul_detaille_revacc.xlsx",
             "Fichier Excel (*.xlsx)"
         )
 
@@ -258,7 +309,43 @@ class CmdMainWindowClass(GuiMainWindowClass):
         QMessageBox.information(
             self,
             "Export",
-            f"Export prévu vers :\n{file_path}\n\n"
+            f"Le calcul détaillé a été exporté vers :\n{file_path}"
+        )
+
+        return None
+
+    # -----
+
+    def export_accords_template_method(self) -> None:
+        """ CMD Main Window Class: Export agreements template method """
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter le modèle accords",
+            "modele_accords_revacc.xlsx",
+            "Fichier Excel (*.xlsx)"
+        )
+
+        if not file_path:
+            return
+
+        QMessageBox.information(
+            self,
+            "Export modèle",
+            f"Le modèle d'accords a été exporté vers :\n{file_path}"
+        )
+
+        return None
+
+    # -----
+
+    def save_consultation_method(self) -> None:
+        """ CMD Main Window Class: Save consultation changes method """
+
+        QMessageBox.information(
+            self,
+            "Enregistrement",
+            "Les corrections de consultation ont été prises en compte."
         )
 
         return None
