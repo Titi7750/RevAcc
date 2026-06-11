@@ -137,7 +137,7 @@ CREATE TABLE `transaction` (
     `quantity`          INT NOT NULL,
     `unit_price`        DECIMAL(10, 2) NOT NULL, -- unit price at the time of transaction
     `total_price`       DECIMAL(10, 2) NOT NULL,
-    `transaction_date`  DATE NOT NULL,
+    `transaction_date`  DATE NULL,
     PRIMARY KEY (`id_transaction`),
     FOREIGN KEY (`fk_id_product`)
         REFERENCES `product`(`id_product`)
