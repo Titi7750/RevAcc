@@ -15,6 +15,7 @@ Industriel → (accord de reversement) → Entegra → (négociation) → Distri
 ```
 brand ──────────────────────────────┬──▶ product
 unit ───────────────────────────────┤
+data_source ────────────────────────┤
 category ───────────────────────────┘
 
 brand ──────────────────────────────┬──▶ agreement ──▶ agreement_tier
@@ -44,7 +45,7 @@ distributor ──────────────────────�
 ## Tables
 
 ### `brand`
-Référentiel des marques (ex: Amora, Knorr, Tabasco).
+Référentiel des marques (ex : Amora, Knorr, Tabasco).
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -54,7 +55,7 @@ Référentiel des marques (ex: Amora, Knorr, Tabasco).
 ---
 
 ### `category`
-Référentiel des catégories produit (ex: Sauces Salades 5L, Tabasco Mini).
+Référentiel des catégories produit (ex : Sauces Salades 5L, Tabasco Mini).
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -63,8 +64,18 @@ Référentiel des catégories produit (ex: Sauces Salades 5L, Tabasco Mini).
 
 ---
 
+### `data_source`
+Référentiel des sources de données (ex : Déclaratif Distributeur Cadhi, Déclaratif Distributeur Entegra Ami2).
+
+| Colonne | Type | Contrainte | Description |
+|---|---|---|---|
+| `id_data_source` | INT | PK, AUTO_INCREMENT | Identifiant unique |
+| `data_source_name` | VARCHAR(255) | NOT NULL | Nom de la source de données |
+
+---
+
 ### `distributor`
-Référentiel des distributeurs (ex: Back Europe, France Frais, Pomona Episaveurs). Les distributeurs sont les vendeurs d'Entegra — ils n'interviennent pas dans la négociation des accords, uniquement dans les transactions.
+Référentiel des distributeurs (ex : Back Europe, France Frais, Pomona Episaveurs). Les distributeurs sont les clients d'Entegra — ils n'interviennent pas dans la négociation des accords, uniquement dans les transactions.
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -74,7 +85,7 @@ Référentiel des distributeurs (ex: Back Europe, France Frais, Pomona Episaveur
 ---
 
 ### `industrial`
-Référentiel des industriels / fournisseurs (ex: Unilever FoodSolutions).
+Référentiel des industriels / fournisseurs (ex : Unilever FoodSolutions).
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -84,7 +95,7 @@ Référentiel des industriels / fournisseurs (ex: Unilever FoodSolutions).
 ---
 
 ### `unit`
-Référentiel des unités de vente (ex: kg, carton, litre).
+Référentiel des unités de vente (ex : Kg, Seau, Bouteille).
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -94,18 +105,19 @@ Référentiel des unités de vente (ex: kg, carton, litre).
 ---
 
 ### `product`
-Produits commercialisés, rattachés à une marque et une catégorie.
+Produits commercialisés, rattachés à une marque, une catégorie et une source de données.
 
-> **Choix de conception** : `product` n'est pas lié à un distributeur ou un industriel spécifique. Un même produit peut être vendu dans le cadre de plusieurs accords différents. Ces liens sont portés par `transaction` et `agreement`.
+> **Choix de conception** : `product` n'est pas lié à un distributeur ou un industriel spécifique. Un même produit peut être vendu dans le cadre de plusieurs accords différents. Ces liens sont portés par `transaction` et `agreement`. La colonne `fk_id_data_source` trace l'origine du référentiel produit (système déclaratif source).
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
 | `id_product` | INT | PK, AUTO_INCREMENT | Identifiant unique |
-| `fk_id_brand` | INT | FK → `brand` | Marque du produit |
-| `fk_id_category` | INT | FK → `category` | Catégorie du produit |
-| `fk_id_unit` | INT | FK → `unit` | Unité de vente |
-| `product_name` | VARCHAR(255) | NOT NULL | Nom du produit |
-| `product_code` | VARCHAR(255) | NOT NULL | Code du produit |
+| `fk_id_brand` | INT | FK → `brand`, NOT NULL | Marque du produit |
+| `fk_id_category` | INT | FK → `category`, NOT NULL | Catégorie du produit |
+| `fk_id_unit` | INT | FK → `unit`, NOT NULL | Unité de vente |
+| `fk_id_data_source` | INT | FK → `data_source`, NOT NULL | Source du référentiel produit |
+| `product_name` | VARCHAR(255) | NULL | Nom du produit (peut être absent si non mappé) |
+| `product_code` | VARCHAR(255) | NULL | Code du produit |
 | `description` | TEXT | NULL | Description libre |
 
 ---
@@ -118,10 +130,10 @@ Accord de reversement entre un industriel et **Entegra**, pour une marque et une
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
 | `id_agreement` | INT | PK, AUTO_INCREMENT | Identifiant unique |
-| `fk_id_brand` | INT | FK → `brand` | Marque concernée |
-| `fk_id_category` | INT | FK → `category` | Catégorie concernée |
-| `fk_id_industrial` | INT | FK → `industrial` | Industriel signataire |
-| `fk_id_unit` | INT | FK → `unit` | Unité de vente pour les paliers |
+| `fk_id_brand` | INT | FK → `brand`, NOT NULL | Marque concernée |
+| `fk_id_category` | INT | FK → `category`, NOT NULL | Catégorie concernée |
+| `fk_id_industrial` | INT | FK → `industrial`, NOT NULL | Industriel signataire |
+| `fk_id_unit` | INT | FK → `unit`, NOT NULL | Unité de vente pour les paliers |
 | `start_date` | DATE | NULL | Date de début de l'accord |
 | `end_date` | DATE | NULL | Date de fin de l'accord |
 
@@ -143,7 +155,7 @@ Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
 | `id_agreement_tier` | INT | PK, AUTO_INCREMENT | Identifiant unique |
-| `fk_id_agreement` | INT | FK → `agreement` | Accord parent |
+| `fk_id_agreement` | INT | FK → `agreement`, NOT NULL | Accord parent |
 | `min_uvc` | INT | NOT NULL | Borne inférieure du palier (incluse) |
 | `max_uvc` | INT | NULL | Borne supérieure du palier (NULL = pas de plafond) |
 | `price` | FLOAT | NOT NULL | Prix de reversement pour ce palier (€) |
@@ -161,16 +173,16 @@ Vente effective d'un produit, dans le cadre d'un accord commercial.
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
 | `id_transaction` | INT | PK, AUTO_INCREMENT | Identifiant unique |
-| `fk_id_product` | INT | FK → `product` | Produit vendu |
-| `fk_id_agreement` | INT | FK → `agreement` | Accord applicable |
-| `fk_id_distributor` | INT | FK → `distributor` | Distributeur acheteur |
+| `fk_id_product` | INT | FK → `product`, NOT NULL | Produit vendu |
+| `fk_id_agreement` | INT | FK → `agreement`, NOT NULL | Accord applicable |
+| `fk_id_distributor` | INT | FK → `distributor`, NOT NULL | Distributeur acheteur |
 | `quantity` | INT | NOT NULL | Quantité vendue (UVC) |
-| `unit_price` | FLOAT | NOT NULL | Prix unitaire au moment de la vente (€) |
-| `total_price` | FLOAT | NOT NULL | Montant total = quantity × unit_price (snapshot) |
+| `unit_price` | DECIMAL(10,2) | NOT NULL | Prix unitaire au moment de la vente (€) |
+| `total_price` | DECIMAL(10,2) | NOT NULL | Montant total = quantity × unit_price (snapshot) |
 | `transaction_date` | DATE | NOT NULL | Date de la transaction |
 
 ---
 
-## Screenshot du MPD dans DBeaver
+## Screenshot du Modèle Physique des Données dans DBeaver
 
 ![MPD database rev_acc_database](database_rev_acc_database.png)
