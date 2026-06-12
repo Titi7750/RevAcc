@@ -12,7 +12,7 @@ import sys
 # Import modules from third party packages
 from PyQt6.QtWidgets import QApplication
 
-# Import personnal functions
+# Import personal functions
 from gui_folder.command_folder.cmd_mainwindow_file import CmdMainWindowClass as main_window
 
 # Custom variable type construction
