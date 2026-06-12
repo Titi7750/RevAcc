@@ -64,6 +64,7 @@ CREATE TABLE `product` (
     `product_name`   VARCHAR(255) NULL,
     `product_code`   VARCHAR(255) NULL,
     `description`    TEXT NULL,
+    `product_date`   DATE NULL,
     PRIMARY KEY (`id_product`),
     FOREIGN KEY (`fk_id_brand`)
         REFERENCES `brand`(`id_brand`)
@@ -113,10 +114,10 @@ CREATE TABLE `agreement` (
 
 DROP TABLE IF EXISTS `agreement_tier`;
 CREATE TABLE `agreement_tier` (
-    `id_agreement_tier` INT   NOT NULL AUTO_INCREMENT,
-    `fk_id_agreement`   INT   NOT NULL,
-    `min_uvc`           INT   NOT NULL,
-    `max_uvc`           INT   DEFAULT NULL,
+    `id_agreement_tier` INT NOT NULL AUTO_INCREMENT,
+    `fk_id_agreement`   INT NOT NULL,
+    `min_uvc`           INT NOT NULL,
+    `max_uvc`           INT DEFAULT NULL,
     `price`             DECIMAL(10, 2) NOT NULL,
     PRIMARY KEY (`id_agreement_tier`),
     FOREIGN KEY (`fk_id_agreement`)
@@ -131,9 +132,9 @@ CREATE TABLE `agreement_tier` (
 DROP TABLE IF EXISTS `transaction`;
 CREATE TABLE `transaction` (
     `id_transaction`    INT NOT NULL AUTO_INCREMENT,
-    `fk_id_product`     INT NOT NULL,
-    `fk_id_agreement`   INT NOT NULL,
-    `fk_id_distributor` INT NOT NULL,
+    `fk_id_product`     INT NULL,
+    `fk_id_agreement`   INT NULL,
+    `fk_id_distributor` INT NULL,
     `quantity`          INT NOT NULL,
     `unit_price`        DECIMAL(10, 2) NOT NULL, -- unit price at the time of transaction
     `total_price`       DECIMAL(10, 2) NOT NULL,
