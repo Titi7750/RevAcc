@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import QProgressBar
 from PyQt6.QtWidgets import QTableWidget
 from PyQt6.QtWidgets import QStackedWidget
 
-# Import personnal functions
+# Import personal functions
 ## None
 
 # Custom variable type construction
@@ -369,6 +369,7 @@ class GuiMainWindowClass(QMainWindow):
         self.table_imports.setColumnCount(4)
         self.table_imports.setHorizontalHeaderLabels(["Type", "Fichier", "Statut", "Commentaire"])
         self.table_imports.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_imports.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -388,17 +389,23 @@ class GuiMainWindowClass(QMainWindow):
         title = QLabel("Mapping produits")
         title.setObjectName("pageTitle")
 
+        self.button_save_mapping = QPushButton("Enregistrer les modifications")
+        self.button_save_mapping.setObjectName("primaryButton")
+
         self.table_mapping = QTableWidget()
-        self.table_mapping.setColumnCount(4)
+        self.table_mapping.setColumnCount(5)
         self.table_mapping.setHorizontalHeaderLabels([
+            "ID",
             "Produit fournisseur",
             "Produit interne",
             "Unité",
             "Statut"
         ])
         self.table_mapping.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_mapping.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
 
         layout.addWidget(title)
+        layout.addWidget(self.button_save_mapping)
         layout.addWidget(self.table_mapping)
 
         return page
@@ -470,6 +477,7 @@ class GuiMainWindowClass(QMainWindow):
             "Détail du calcul"
         ])
         self.table_resultats.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_resultats.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -489,8 +497,14 @@ class GuiMainWindowClass(QMainWindow):
         title = QLabel("Consultation et correction")
         title.setObjectName("pageTitle")
 
-        subtitle = QLabel("Afficher les données produits et les accords au même endroit pour vérifier, corriger et valider sans aller-retour.")
+        subtitle = QLabel("Afficher et modifier toutes les données — produits, accords, transactions et référentiels.")
         subtitle.setObjectName("subtitle")
+
+        save_row = QHBoxLayout()
+        self.button_save_consultation = QPushButton("Enregistrer les modifications")
+        self.button_save_consultation.setObjectName("primaryButton")
+        save_row.addStretch()
+        save_row.addWidget(self.button_save_consultation)
 
         self.consultation_tabs = QTabWidget()
         self.consultation_tabs.setObjectName("consultationTabs")
@@ -498,17 +512,14 @@ class GuiMainWindowClass(QMainWindow):
         self.consultation_tabs.setTabBar(TearOffTabBar(self.consultation_tabs))
         self.consultation_tabs.tabBar().tearOffRequested.connect(self.detach_consultation_tab_method)
 
+        # ── Produits ──────────────────────────────────────────────────────────
         products_tab = QWidget()
         products_layout = QVBoxLayout(products_tab)
 
         self.table_consult_products = QTableWidget()
         self.table_consult_products.setColumnCount(5)
         self.table_consult_products.setHorizontalHeaderLabels([
-            "ID produit",
-            "Produit source",
-            "Produit mappé",
-            "Statut",
-            "Action"
+            "ID produit", "Produit source", "Produit mappé", "Unité", "Statut"
         ])
         self.table_consult_products.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_consult_products.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
@@ -522,18 +533,14 @@ class GuiMainWindowClass(QMainWindow):
         products_layout.addWidget(self.table_consult_products)
         products_layout.addWidget(self.product_dock_output)
 
+        # ── Accords ───────────────────────────────────────────────────────────
         accords_tab = QWidget()
         accords_layout = QVBoxLayout(accords_tab)
 
         self.table_consult_accords = QTableWidget()
         self.table_consult_accords.setColumnCount(6)
         self.table_consult_accords.setHorizontalHeaderLabels([
-            "ID accord",
-            "Fournisseur",
-            "Produit",
-            "Période",
-            "Taux",
-            "Statut"
+            "ID accord", "Fournisseur", "Produit", "Période", "Taux", "Statut"
         ])
         self.table_consult_accords.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table_consult_accords.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
@@ -545,13 +552,84 @@ class GuiMainWindowClass(QMainWindow):
         )
 
         accords_layout.addWidget(self.table_consult_accords)
+
+        # ── Transactions ──────────────────────────────────────────────────────
+        transactions_tab = QWidget()
+        transactions_layout = QVBoxLayout(transactions_tab)
+        self.table_consult_transactions = QTableWidget()
+        self.table_consult_transactions.setColumnCount(7)
+        self.table_consult_transactions.setHorizontalHeaderLabels([
+            "ID", "Date", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"
+        ])
+        self.table_consult_transactions.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_consult_transactions.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+
+        transactions_layout.addWidget(self.table_consult_transactions)
         accords_layout.addWidget(self.accord_dock_output)
 
-        self.consultation_tabs.addTab(products_tab, "Produits")
-        self.consultation_tabs.addTab(accords_tab, "Accords")
+        # ── Marques ───────────────────────────────────────────────────────────
+        brands_tab = QWidget()
+        brands_layout = QVBoxLayout(brands_tab)
+        self.table_consult_brands = QTableWidget()
+        self.table_consult_brands.setColumnCount(2)
+        self.table_consult_brands.setHorizontalHeaderLabels(["ID", "Marque"])
+        self.table_consult_brands.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_consult_brands.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        brands_layout.addWidget(self.table_consult_brands)
+
+        # ── Catégories ────────────────────────────────────────────────────────
+        categories_tab = QWidget()
+        categories_layout = QVBoxLayout(categories_tab)
+        self.table_consult_categories = QTableWidget()
+        self.table_consult_categories.setColumnCount(2)
+        self.table_consult_categories.setHorizontalHeaderLabels(["ID", "Catégorie"])
+        self.table_consult_categories.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_consult_categories.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        categories_layout.addWidget(self.table_consult_categories)
+
+        # ── Distributeurs ─────────────────────────────────────────────────────
+        distributors_tab = QWidget()
+        distributors_layout = QVBoxLayout(distributors_tab)
+        self.table_consult_distributors = QTableWidget()
+        self.table_consult_distributors.setColumnCount(2)
+        self.table_consult_distributors.setHorizontalHeaderLabels(["ID", "Distributeur"])
+        self.table_consult_distributors.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_consult_distributors.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        distributors_layout.addWidget(self.table_consult_distributors)
+
+        # ── Industriels ───────────────────────────────────────────────────────
+        industrials_tab = QWidget()
+        industrials_layout = QVBoxLayout(industrials_tab)
+        self.table_consult_industrials = QTableWidget()
+        self.table_consult_industrials.setColumnCount(2)
+        self.table_consult_industrials.setHorizontalHeaderLabels(["ID", "Industriel"])
+        self.table_consult_industrials.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_consult_industrials.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        industrials_layout.addWidget(self.table_consult_industrials)
+
+        # ── Unités ────────────────────────────────────────────────────────────
+        units_tab = QWidget()
+        units_layout = QVBoxLayout(units_tab)
+        self.table_consult_units = QTableWidget()
+        self.table_consult_units.setColumnCount(2)
+        self.table_consult_units.setHorizontalHeaderLabels(["ID", "Unité"])
+        self.table_consult_units.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_consult_units.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
+        units_layout.addWidget(self.table_consult_units)
+
+        # ── Add tabs ──────────────────────────────────────────────────────────
+        self.consultation_tabs.addTab(products_tab,     "Produits")
+        self.consultation_tabs.addTab(accords_tab,      "Accords")
+        self.consultation_tabs.addTab(transactions_tab, "Transactions")
+        self.consultation_tabs.addTab(brands_tab,       "Marques")
+        self.consultation_tabs.addTab(categories_tab,   "Catégories")
+        self.consultation_tabs.addTab(distributors_tab, "Distributeurs")
+        self.consultation_tabs.addTab(industrials_tab,  "Industriels")
+        self.consultation_tabs.addTab(units_tab,        "Unités")
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        layout.addLayout(save_row)
         layout.addWidget(self.consultation_tabs)
 
         return page
