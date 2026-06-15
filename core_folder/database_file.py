@@ -1,5 +1,6 @@
 # Import Python packages
 import os
+from pathlib import Path
 
 # Import modules from Python packages
 ## None
@@ -19,7 +20,8 @@ from sqlalchemy import create_engine
 
 # -----
 
-load_dotenv(".env.local")
+# Chemin absolu vers .env.local (indépendant du répertoire de lancement)
+load_dotenv(Path(__file__).parent.parent / ".env.local")
 _ENGINE = None
 
 # -----
@@ -49,5 +51,5 @@ def get_connection_method():
 
     return get_engine_method().connect()
 
-# Alias used by service modules
-get_connection = get_connection_method()
+# Alias utilisé par les modules
+get_connection = get_connection_method

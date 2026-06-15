@@ -8,85 +8,104 @@
 ## None
 
 # Import modules from third party packages
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtWidgets import QFileDialog
-from PyQt6.QtWidgets import QTableWidgetItem
 from PyQt6.QtWidgets import QMessageBox
 
-# Import personnal functions
+# Import personal functions
 from gui_folder.graphic_folder.gui_mainwindow_file import GuiMainWindowClass
-
+from gui_folder.command_folder.cmd_import_file import CmdImportPageClass
+from gui_folder.command_folder.cmd_calculation_file import CmdCalculationPageClass
+from gui_folder.command_folder.cmd_consultation_file import CmdConsultationPageClass
+# -----
+from core_folder.calculation_file import load_dashboard_kpis_method
 # Custom variable type construction
 ## None
 
 # -----
 
+
 class CmdMainWindowClass(GuiMainWindowClass):
-    """ CMD Main Window Class """
+    """
+    Contrôleur de la fenêtre principale.
+    Assemble les 3 pages fonctionnelles dans le QStackedWidget,
+    gère la navigation entre les pages et la mise à jour du dashboard.
+    """
 
     def __init__(self) -> None:
-        """ CMD Main Window Class: initialisation Method """
-
         super().__init__()
 
+        # ── Création des pages fonctionnelles ────────────────────────────────
+        # Chaque page est un CmdXxx qui hérite de GuiXxx (vue + logique ensemble)
+        self.import_page       = CmdImportPageClass()
+        self.calculation_page  = CmdCalculationPageClass()
+        self.consultation_page = CmdConsultationPageClass()
+
+        # ── Ajout des pages dans le QStackedWidget ────────────────────────────
+        # L'ordre définit l'index utilisé dans change_page_method :
+        # 0 = Dashboard, 1 = Import, 2 = Calcul, 3 = Consultation
+        self.pages.addWidget(self.dashboard_page)
+        self.pages.addWidget(self.import_page)
+        self.pages.addWidget(self.calculation_page)
+        self.pages.addWidget(self.consultation_page)
+
         self.connect_events_method()
+
+        # Page de démarrage : tableau de bord
         self.change_page_method(0, self.button_dashboard)
 
-        self.load_fake_data_method()
+        # Chargement initial des données depuis la base
+        self.refresh_dashboard_method()
+        self.consultation_page.load_data_method()
 
         return None
 
     # -----
 
     def connect_events_method(self) -> None:
-        """ CMD Main Window Class: Connect events method """
+        """ Connexion des boutons de navigation et des signaux inter-pages """
 
-        # Navigation
-        self.button_dashboard.clicked.connect(lambda: self.change_page_method(0, self.button_dashboard))
-        self.button_import.clicked.connect(lambda: self.change_page_method(1, self.button_import))
-        self.button_mapping.clicked.connect(lambda: self.change_page_method(2, self.button_mapping))
-        self.button_calculation.clicked.connect(lambda: self.change_page_method(3, self.button_calculation))
-        self.button_result.clicked.connect(lambda: self.change_page_method(4, self.button_result))
-        self.button_consultation.clicked.connect(lambda: self.change_page_method(5, self.button_consultation))
-
-        # Import
-        self.button_import_produits.clicked.connect(
-            lambda: self.import_file_method("Produits")
+        # Boutons de la sidebar → changement de page
+        self.button_dashboard.clicked.connect(
+            lambda: self.change_page_method(0, self.button_dashboard)
         )
-        self.button_import_accords.clicked.connect(
-            lambda: self.import_file_method("Accords")
+        self.button_import.clicked.connect(
+            lambda: self.change_page_method(1, self.button_import)
         )
-        self.button_export_accords_template.clicked.connect(self.export_accords_template_method)
+        self.button_calculation.clicked.connect(
+            lambda: self.change_page_method(2, self.button_calculation)
+        )
+        self.button_consultation.clicked.connect(
+            lambda: self.change_page_method(3, self.button_consultation)
+        )
 
-        # Calcul
-        self.button_start_calculation.clicked.connect(self.run_calculation_method)
+        # Après un import réussi : rafraîchir le dashboard et la consultation
+        self.import_page.data_changed.connect(self.refresh_dashboard_method)
+        self.import_page.data_changed.connect(self.consultation_page.load_data_method)
 
-        # Export
-        self.button_export_results.clicked.connect(self.export_result_method)
+        # Après un calcul réussi : mettre à jour le KPI revenu sur le dashboard
+        self.calculation_page.calc_done.connect(self.on_calculation_done_method)
 
         return None
 
     # -----
 
     def change_page_method(self, param_page_index: int, param_active_button) -> None:
-        """ CMD Main Window Class: Change page method """
+        """ Change la page visible et met à jour l'état visuel actif du bouton dans la sidebar """
 
         self.pages.setCurrentIndex(param_page_index)
 
-        menu_buttons = [
+        # Réinitialisation de l'état actif de tous les boutons
+        nav_buttons = [
             self.button_dashboard,
             self.button_import,
-            self.button_mapping,
             self.button_calculation,
-            self.button_result,
-            self.button_consultation
+            self.button_consultation,
         ]
+        for nav_button in nav_buttons:
+            nav_button.setProperty("active", False)
+            nav_button.style().unpolish(nav_button)
+            nav_button.style().polish(nav_button)
 
-        for button in menu_buttons:
-            button.setProperty("active", False)
-            button.style().unpolish(button)
-            button.style().polish(button)
-
+        # Activation du bouton sélectionné (met à jour la couleur via QSS)
         param_active_button.setProperty("active", True)
         param_active_button.style().unpolish(param_active_button)
         param_active_button.style().polish(param_active_button)
@@ -95,259 +114,33 @@ class CmdMainWindowClass(GuiMainWindowClass):
 
     # -----
 
-    def import_file_method(self, param_file_type: str) -> None:
-        """ CMD Main Window Class: Import file method """
+    def refresh_dashboard_method(self) -> None:
+        """ Recharge les 3 KPI chiffrés depuis la base et met à jour les cartes """
 
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            f"Importer {param_file_type}",
-            "",
-            "Fichiers Excel/CSV (*.xlsx *.csv)"
-        )
-
-        if not file_path:
+        try:
+            kpis = load_dashboard_kpis_method()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Connexion base de données",
+                f"Impossible de charger les données :\n{exc}\n\nVérifiez .env.local.",
+            )
             return
 
-        row = self.table_imports.rowCount()
-        self.table_imports.insertRow(row)
-
-        self.table_imports.setItem(row, 0, QTableWidgetItem(param_file_type))
-        self.table_imports.setItem(row, 1, QTableWidgetItem(file_path))
-        self.table_imports.setItem(row, 2, QTableWidgetItem("Importé"))
-        self.table_imports.setItem(row, 3, QTableWidgetItem("Prêt à être contrôlé"))
-
-        QMessageBox.information(
-            self,
-            "Import réussi",
-            f"Le fichier {param_file_type} a bien été importé."
-        )
-
-        return None
-
-    # ----- START OF FUNCTIONS TEMPORARY -----
-
-    def load_fake_data_method(self) -> None:
-        """ CMD Main Window Class: Load fake data method """
-
-        self.load_fake_mapping_method()
-        self.load_fake_consultation_method()
-        self.load_fake_imports_method()
-        self.load_fake_results_method()
-        self.update_dashboard_method()
+        # Mise à jour des cartes (le KPI revenu est géré séparément par on_calculation_done_method)
+        self.kpi_accords.value_label.setText(str(kpis["accords"]))
+        self.kpi_produits.value_label.setText(str(kpis["produits"]))
+        self.kpi_a_verifier.value_label.setText(str(kpis["a_verifier"]))
 
         return None
 
     # -----
 
-    def load_fake_mapping_method(self) -> None:
-        """ CMD Main Window Class: Load fake mapping method """
+    def on_calculation_done_method(self, param_total_revenue: float) -> None:
+        """ Met à jour le KPI revenu sur le dashboard après un calcul réussi """
 
-        data = [
-            ["Coca-Cola 24x33cl", "Coca-Cola 33cl", "carton → unité", "OK"],
-            ["Sprite Zero 12x50cl", "Sprite Zero 50cl", "carton → unité", "OK"],
-            ["Evian Pack 6x1L", "Evian 1L", "pack → unité", "OK"],
-            ["Produit inconnu ABC", "", "", "À corriger"],
-        ]
-
-        self.table_mapping.setRowCount(len(data))
-
-        for row_index, row_data in enumerate(data):
-            for col_index, value in enumerate(row_data):
-                self.table_mapping.setItem(
-                    row_index,
-                    col_index,
-                    QTableWidgetItem(value)
-                )
+        # Formatage : séparateur espace pour les milliers (convention française), 2 décimales
+        revenue_display = f"{param_total_revenue:,.2f} €".replace(",", " ")
+        self.kpi_revenus.value_label.setText(revenue_display)
 
         return None
-
-    # -----
-
-    def load_fake_results_method(self) -> None:
-        """ CMD Main Window Class: Load fake results method """
-
-        data = [
-            ["Coca-Cola", "Avril 2026", "52 000 €", "5 %", "2 600 €", "52 000 × 5 % = 2 600 €"],
-            ["Nestlé", "Avril 2026", "38 400 €", "4 %", "1 536 €", "38 400 × 4 % = 1 536 €"],
-            ["Danone", "Avril 2026", "61 200 €", "3,5 %", "2 142 €", "61 200 × 3,5 % = 2 142 €"],
-            ["PepsiCo", "Avril 2026", "29 800 €", "5 %", "1 490 €", "29 800 × 5 % = 1 490 €"],
-        ]
-
-        self.table_resultats.setRowCount(len(data))
-
-        for row_index, row_data in enumerate(data):
-            for col_index, value in enumerate(row_data):
-                self.table_resultats.setItem(
-                    row_index,
-                    col_index,
-                    QTableWidgetItem(value)
-                )
-
-        self.calculation_details.setPlainText(
-            "1. Import des transactions\n"
-            "2. Contrôle du mapping produit\n"
-            "3. Vérification des accords\n"
-            "4. Calcul du revenu ligne par ligne\n"
-            "5. Génération de l'export détaillé"
-        )
-
-        return None
-
-    # -----
-
-    def load_fake_consultation_method(self) -> None:
-        """ CMD Main Window Class: Load fake consultation data method """
-
-        products = [
-            ["P-001", "Coca-Cola 24x33cl", "Coca-Cola 33cl", "À vérifier", "Corriger"],
-            ["P-002", "Sprite Zero 12x50cl", "Sprite Zero 50cl", "OK", "Voir"],
-            ["P-003", "Evian Pack 6x1L", "Evian 1L", "OK", "Voir"],
-            ["P-004", "Produit inconnu ABC", "", "Non mappé", "Mapper"],
-        ]
-
-        accords = [
-            ["A-100", "Coca-Cola Europacific", "Coca-Cola 33cl", "Avril 2026", "5 %", "Actif"],
-            ["A-101", "Nestlé Waters", "Evian 1L", "Avril 2026", "4 %", "Actif"],
-            ["A-102", "PepsiCo France", "Pepsi", "Avril 2026", "3,5 %", "À corriger"],
-            ["A-103", "Danone", "Danone", "Avril 2026", "2,5 %", "Actif"],
-        ]
-
-        self.table_consult_products.setRowCount(len(products))
-        for row_index, row_data in enumerate(products):
-            for col_index, value in enumerate(row_data):
-                self.table_consult_products.setItem(row_index, col_index, QTableWidgetItem(value))
-
-        self.table_consult_accords.setRowCount(len(accords))
-        for row_index, row_data in enumerate(accords):
-            for col_index, value in enumerate(row_data):
-                self.table_consult_accords.setItem(row_index, col_index, QTableWidgetItem(value))
-
-        self.product_dock_output.setPlainText(
-            "Produit sélectionné :\n"
-            "- Vérification du mapping\n"
-            "- Correction directe si nécessaire\n"
-            "- Règle de correspondance appliquée"
-        )
-
-        self.accord_dock_output.setPlainText(
-            "Accord sélectionné :\n"
-            "- Contrôle du fournisseur\n"
-            "- Vérification du taux\n"
-            "- Cohérence produit / période / statut"
-        )
-
-        return None
-
-    # -----
-
-    def load_fake_imports_method(self) -> None:
-        """ CMD Main Window Class: Load fake imports overview method """
-
-        imports = [
-            ["Produits", "mapping_produits.xlsx", "Importé", "Base de travail pour le mapping"],
-            ["Accords", "accords_exemple.xlsx", "Importé", "Modèle de référence pour les imports"],
-            ["Transactions", "transactions_mensuelles.xlsx", "Importé", "Source du calcul"],
-        ]
-
-        self.table_imports.setRowCount(len(imports))
-        for row_index, row_data in enumerate(imports):
-            for col_index, value in enumerate(row_data):
-                self.table_imports.setItem(row_index, col_index, QTableWidgetItem(value))
-
-        return None
-
-    def update_dashboard_method(self) -> None:
-        """ CMD Main Window Class: Update dashboard method """
-
-        self.kpi_revenus.value_label.setText("7 768 €")
-        self.kpi_accords.value_label.setText("42")
-        self.kpi_produits.value_label.setText("1 284")
-        self.kpi_consultations.value_label.setText("4")
-
-        return None
-
-    # -----
-
-    def run_calculation_method(self) -> None:
-        """ CMD Main Window Class: Run calculation method """
-
-        self.progress_calcul.setValue(0)
-        self.label_calcul_status.setText("Calcul en cours...")
-
-        # Simulation simple
-        for value in range(0, 101, 20):
-            self.progress_calcul.setValue(value)
-            QApplication.processEvents()
-
-        self.label_calcul_status.setText("Calcul terminé avec succès.")
-        self.calculation_details.append("Export détaillé prêt à être généré.")
-        self.update_dashboard_method()
-
-        QMessageBox.information(
-            self,
-            "Calcul terminé",
-            "Les revenus ont été calculés avec succès."
-        )
-
-        return None
-
-    # -----
-
-    def export_result_method(self) -> None:
-        """ CMD Main Window Class: Export calculation details method """
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Exporter le calcul détaillé",
-            "calcul_detaille_revacc.xlsx",
-            "Fichier Excel (*.xlsx)"
-        )
-
-        if not file_path:
-            return
-
-        QMessageBox.information(
-            self,
-            "Export",
-            f"Le calcul détaillé a été exporté vers :\n{file_path}"
-        )
-
-        return None
-
-    # -----
-
-    def export_accords_template_method(self) -> None:
-        """ CMD Main Window Class: Export agreements template method """
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Exporter le modèle accords",
-            "modele_accords_revacc.xlsx",
-            "Fichier Excel (*.xlsx)"
-        )
-
-        if not file_path:
-            return
-
-        QMessageBox.information(
-            self,
-            "Export modèle",
-            f"Le modèle d'accords a été exporté vers :\n{file_path}"
-        )
-
-        return None
-
-    # -----
-
-    def save_consultation_method(self) -> None:
-        """ CMD Main Window Class: Save consultation changes method """
-
-        QMessageBox.information(
-            self,
-            "Enregistrement",
-            "Les corrections de consultation ont été prises en compte."
-        )
-
-        return None
-
-    # -----
