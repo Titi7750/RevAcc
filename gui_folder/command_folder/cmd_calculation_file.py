@@ -71,7 +71,7 @@ class CmdCalculationPageClass(GuiCalculationPageClass):
     def connect_events_method(self) -> None:
         """ Connexion du bouton de lancement """
 
-        self.button_start_calculation.clicked.connect(self.start_calc_method)
+        self.button_start_calculation.clicked.connect(self.start_calculation_method)
 
         return None
 

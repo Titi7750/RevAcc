@@ -28,7 +28,7 @@ from core_folder.import_file import import_transactions, import_agreements
 
 # -----
 
-class _ImportWorker(QThread):
+class ImportWorker(QThread):
     """
     Thread d'arrière-plan pour exécuter un import Excel sans bloquer l'interface.
     Émet progress(pourcentage, message) pendant l'import,
@@ -159,7 +159,7 @@ class CmdImportPageClass(GuiImportPageClass):
         self.button_import_accords.setEnabled(False)
 
         # Démarrage du thread d'import
-        self._import_worker = _ImportWorker(param_file_type, file_path)
+        self._import_worker = ImportWorker(param_file_type, file_path)
         self._import_worker.progress.connect(self.on_import_progress_method)
         self._import_worker.finished.connect(self.on_import_finished_method)
         self._import_worker.error.connect(self.on_import_error_method)

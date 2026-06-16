@@ -61,10 +61,10 @@ class GuiConsultationPageClass(QWidget):
 
         # Onglets principaux
         self.table_consult_products = self.make_table_method(
-            ["ID", "Produit", "Marque › Catégorie", "Unité", "Statut"]
+            ["ID", "Produit", "Marque - Catégorie", "Unité", "Statut"]
         )
         self.table_consult_accords = self.make_table_method(
-            ["ID", "Industriel", "Marque – Catégorie", "Période", "Taux", "Statut"]
+            ["ID", "Industriel", "Marque - Catégorie", "Période", "Taux", "Statut"]
         )
         self.table_consult_transactions = self.make_table_method(
             ["ID", "Date", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"]
