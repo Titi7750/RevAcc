@@ -65,6 +65,7 @@ CREATE TABLE `product` (
     `product_code`   VARCHAR(255) NULL,
     `description`    TEXT NULL,
     `product_date`   DATE NULL,
+    `units_per_case` INT NOT NULL DEFAULT 1,
     PRIMARY KEY (`id_product`),
     FOREIGN KEY (`fk_id_brand`)
         REFERENCES `brand`(`id_brand`)
@@ -91,6 +92,7 @@ CREATE TABLE `agreement` (
     `fk_id_category`    INT NOT NULL,
     `fk_id_industrial`  INT NOT NULL,
     `fk_id_unit`        INT NOT NULL,
+    `palier_group`      VARCHAR(255) NULL,
     `start_date`        DATE NULL,
     `end_date`          DATE NULL,
     PRIMARY KEY (`id_agreement`),
