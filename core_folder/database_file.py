@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Import modules from third party packages
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 # Import personal functions
 ## None
@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 # -----
 
 # Chemin absolu vers .env.local (indépendant du répertoire de lancement)
-load_dotenv(Path(__file__).parent.parent / ".env.local")
+load_dotenv(Path(__file__).parent.parent / ".env.local", override=True)
 _ENGINE = None
 
 # -----
@@ -53,3 +53,38 @@ def get_connection_method():
 
 # Alias utilisé par les modules
 get_connection = get_connection_method
+
+# -----
+
+def get_or_create(param_connection, param_table: str, param_column_name: str, param_value: str | None) -> int | None:
+    """ Retourne l'ID d'une ligne de référence existante, ou insère et retourne le nouvel ID """
+
+    if param_value is None:
+        return None
+
+    id_column = f"id_{param_table}"
+
+    row = param_connection.execute(
+        text(f"SELECT {id_column} FROM `{param_table}` WHERE `{param_column_name}` = :value"),
+        {"value": param_value}
+    ).fetchone()
+
+    if row:
+        return int(row[0])
+
+    result = param_connection.execute(
+        text(f"INSERT INTO `{param_table}` (`{param_column_name}`) VALUES (:value)"),
+        {"value": param_value},
+    )
+    param_connection.commit()
+
+    return int(result.lastrowid)
+
+# -----
+
+def get_or_create_many(param_connection, param_table: str, param_column_name: str, param_values) -> dict:
+    """ Applique get_or_create à toutes les valeurs uniques non-nulles. Retourne {value: id} """
+
+    unique_values = {value for value in param_values if value is not None and str(value) not in ("", "nan")}
+
+    return {value: get_or_create(param_connection, param_table, param_column_name, value) for value in unique_values}

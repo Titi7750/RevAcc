@@ -12,42 +12,48 @@ DROP TABLE IF EXISTS `brand`;
 CREATE TABLE `brand` (
     `id_brand`   INT NOT NULL AUTO_INCREMENT,
     `brand_name` VARCHAR(255) NOT NULL,
-    PRIMARY KEY (`id_brand`)
+    PRIMARY KEY (`id_brand`),
+    UNIQUE KEY `uq_brand_name` (`brand_name`)
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS `category`;
 CREATE TABLE `category` (
     `id_category`   INT NOT NULL AUTO_INCREMENT,
     `category_name` VARCHAR(255) NOT NULL,
-    PRIMARY KEY (`id_category`)
+    PRIMARY KEY (`id_category`),
+    UNIQUE KEY `uq_category_name` (`category_name`)
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS `distributor`;
 CREATE TABLE `distributor` (
     `id_distributor`   INT NOT NULL AUTO_INCREMENT,
     `distributor_name` VARCHAR(255) NOT NULL,
-    PRIMARY KEY (`id_distributor`)
+    PRIMARY KEY (`id_distributor`),
+    UNIQUE KEY `uq_distributor_name` (`distributor_name`)
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS `industrial`;
 CREATE TABLE `industrial` (
     `id_industrial`   INT NOT NULL AUTO_INCREMENT,
     `industrial_name` VARCHAR(255) NOT NULL,
-    PRIMARY KEY (`id_industrial`)
+    PRIMARY KEY (`id_industrial`),
+    UNIQUE KEY `uq_industrial_name` (`industrial_name`)
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS `unit`;
 CREATE TABLE `unit` (
     `id_unit`   INT NOT NULL AUTO_INCREMENT,
     `unit_name` VARCHAR(255) NOT NULL,
-    PRIMARY KEY (`id_unit`)
+    PRIMARY KEY (`id_unit`),
+    UNIQUE KEY `uq_unit_name` (`unit_name`)
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS `data_source`;
 CREATE TABLE `data_source` (
     `id_data_source`   INT NOT NULL AUTO_INCREMENT,
     `data_source_name` VARCHAR(255) NOT NULL,
-    PRIMARY KEY (`id_data_source`)
+    PRIMARY KEY (`id_data_source`),
+    UNIQUE KEY `uq_data_source_name` (`data_source_name`)
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------

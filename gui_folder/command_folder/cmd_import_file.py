@@ -113,7 +113,7 @@ class CmdImportPageClass(GuiImportPageClass):
     def start_import_method(self, param_file_type: str) -> None:
         """ Ouvre le sélecteur de fichier et lance l'import du type donné """
 
-        # Sélection du fichier Excel à importer
+        # Sélection du fichier Excel principal à importer
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             f"Importer {param_file_type}",
@@ -128,8 +128,9 @@ class CmdImportPageClass(GuiImportPageClass):
             reply = QMessageBox.question(
                 self,
                 "Confirmation — Import accords",
-                "L'import va supprimer tous les accords existants et leurs paliers.\n"
-                "Les transactions liées perdront leur lien d'accord (fk_id_agreement = NULL).\n\n"
+                "L'import va mettre à jour les accords commerciaux.\n"
+                "Les accords modifiés seront archivés, les accords identiques prolongés.\n"
+                "Aucune donnée ne sera supprimée.\n\n"
                 "Continuer ?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -198,7 +199,10 @@ class CmdImportPageClass(GuiImportPageClass):
             )
         else:
             result_detail = (
-                f"{param_result['agreements']} accords, {param_result['tiers']} paliers insérés"
+                f"{param_result['agreements']} accords créés, "
+                f"{param_result.get('extended', 0)} prolongés, "
+                f"{param_result.get('closed', 0)} archivés — "
+                f"{param_result['tiers']} paliers insérés"
             )
 
         # Mise à jour de la ligne dans le tableau d'historique
