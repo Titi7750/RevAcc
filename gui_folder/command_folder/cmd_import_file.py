@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
 # Import personal functions
 from gui_folder.graphic_folder.gui_import_file import GuiImportPageClass
 # -----
-from core_folder.export_file import export_agreements_template
 from core_folder.import_file import import_transactions, import_agreements
 
 # Custom variable type construction
@@ -253,24 +252,11 @@ class CmdImportPageClass(GuiImportPageClass):
     def export_template_method(self) -> None:
         """ Export du modèle accords vers un fichier Excel choisi par l'utilisateur """
 
-        file_path, _ = QFileDialog.getSaveFileName(
+        QMessageBox.information(
             self,
-            "Exporter le modèle accords",
-            "modele_accords_revacc.xlsx",
-            "Fichier Excel (*.xlsx)",
+            "En cours de développement",
+            "L'export du modèle accords est en cours de développement.\n"
+            "Cette fonctionnalité sera disponible dans une prochaine version.",
         )
-        if not file_path:
-            return
-
-        try:
-            export_agreements_template(file_path)
-            QMessageBox.information(
-                self,
-                "Export réussi",
-                f"Modèle exporté vers :\n{file_path}\n\n"
-                "Modifiez ce fichier puis importez-le via « Importer accords ».",
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Erreur d'export", str(exc))
 
         return None
