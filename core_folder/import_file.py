@@ -60,7 +60,7 @@ DESCRIPTION_BRAND_KEYWORDS = [
 
 VOLUME_CATEGORY_BRANDS = {"TABASCO", "MAIZENA"}
 
-# Pattern regex pour détecter les codes UPC dans la description, par exemple "12x250ml", "6X1L", "x3", etc.
+# Détecte le nombre d'unités par colis depuis la description (ex : "125G*40" → 40, "12x250ml" → 12)
 UPC_PATTERN = re.compile(r'\d+[A-Za-z]+[xX*](\d+)|\d+[xX*](\d+)|(?<![A-Za-z\d])[xX](\d+)')
 
 # -----
@@ -178,14 +178,28 @@ def parse_palier_column_name_method(param_column_name: str):
 
 # -----
 
-def import_transactions(param_file_path: str, param_progress_callback=None, param_transaction_date: date | None = None,) -> dict:
+def import_transactions(
+    param_file_path: str,
+    param_progress_callback=None,
+    param_transaction_date: date | None = None,
+    param_mapping_path: str | None = None,
+) -> dict:
     """
     Import d'un fichier Excel de transactions.
-    Accepte le format brut (colonnes françaises) et le format final (colonnes anglaises avec product_name).
-    En format brut : nettoyage des unités, détection des marques, insertion des nouveaux produits.
-    La catégorie des nouveaux produits est déduite des accords actifs en base de données.
-    param_transaction_date : date à associer aux transactions importées — par défaut, la date du jour.
-    Ajoute de nouvelles transactions; résout les FK à partir du catalogue et des accords existants.
+
+    Accepte deux formats :
+    - Format brut  : colonnes françaises (product_detail_export.xlsx)
+    - Format final : colonnes anglaises avec product_name déjà renseigné
+
+    En format brut, la pipeline complète est exécutée :
+    normalisation des colonnes et des unités, détection des marques, keyword matching
+    pour résoudre product_name et catégorie, puis insertion des nouveaux produits.
+
+    param_transaction_date : date à associer à toutes les transactions importées. Par défaut : date du jour de l'import.
+    param_mapping_path : chemin absolu vers mapping_product.xlsx, fourni par l'interface.
+        -> Obligatoire pour le format brut. Ignoré pour le format final.
+
+    Retourne un résumé : transactions insérées, FK manquantes, date utilisée.
     """
 
     transaction_date = param_transaction_date or date.today()
@@ -217,7 +231,7 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
     if filter_mask.any():
         dataframe = dataframe[~filter_mask].reset_index(drop=True)
 
-    # Auto-détection du format brut : renommage des colonnes françaises
+    # Auto-détection du format : renommage des colonnes françaises si format brut
     is_raw_format = "DISTRIBUTEUR" in dataframe.columns
     if is_raw_format:
         dataframe = dataframe.rename(columns=RAW_COLUMN_MAP)
@@ -229,7 +243,7 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
         if "Montant HT" in dataframe.columns:
             dataframe = dataframe.rename(columns={"Montant HT": "amount_ht"})
 
-    # ── Étape 1b : Nettoyage et attribution du product_name (format brut) ────
+    # ── Étape 1b : Nettoyage et keyword matching (format brut uniquement) ────
     if is_raw_format:
         _progression_bar(5, "Attribution des noms produits…")
 
@@ -251,7 +265,7 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
             )
             dataframe.loc[mask_description | mask_code, "brand"] = brand_keyword
 
-        # Title case sur toutes les colonnes texte, vérification des majuscules après apostrophe (ex : Hellmann's → Hellmann's, pas Hellmann'S)
+        # Title case sur toutes les colonnes texte + correction des majuscules après apostrophe
         for column in dataframe.select_dtypes(include=["object"]).columns:
             dataframe[column] = (
                 dataframe[column]
@@ -265,10 +279,20 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
                 lambda brand: BRAND_CORRECTION.get(brand, brand) if pd.notna(brand) else brand
             )
 
-        # product_name sera résolu depuis la base de données pour les produits existants (étape 4)
-        if "product_name" not in dataframe.columns:
-            dataframe["product_name"] = None
+        # Keyword matching pour résoudre product_name ET catégorie.
+        # Seule source fiable pour les marques multi-catégories (Amora, Knorr, etc.)
+        if not param_mapping_path:
+            raise ValueError(
+                "param_mapping_path est requis pour importer un fichier au format brut. "
+                "Fournissez le chemin vers mapping_product.xlsx depuis l'interface."
+            )
 
+        mapping_keywords = pd.read_excel(param_mapping_path, sheet_name="mapping_products")
+        dataframe["product_name"] = dataframe.apply(
+            lambda row: find_product_name_method(row, mapping_keywords), axis=1
+        )
+
+    # Vérification des colonnes minimales requises
     required = {"distributor", "product_name", "quantity", "amount_ht"}
     missing = required - set(dataframe.columns)
     if missing:
@@ -302,7 +326,11 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
             get_or_create_many(param_connection=connection, param_table="brand", param_column_name="brand_name", param_values=dataframe["brand"])
         if "unit" in dataframe.columns:
             get_or_create_many(param_connection=connection, param_table="unit", param_column_name="unit_name", param_values=dataframe["unit"])
+        if is_raw_format:
+            # Toutes les catégories du mapping doivent exister avant l'insertion des produits
+            get_or_create_many(param_connection=connection, param_table="category", param_column_name="category_name", param_values=mapping_keywords["categories"])
         get_or_create(param_connection=connection, param_table="category", param_column_name="category_name", param_value="Non catégorisé")
+
         connection.commit()
 
     # ── Étape 3 : Chargement du catalogue ────────────────────────────────────
@@ -326,8 +354,8 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
         for column in ("product_code", "description", "data_source"):
             database_product[column] = database_product[column].fillna("").astype(str).replace("nan", "")
 
-        # Uniquement les accords actifs (end_date >= aujourd'hui) — ORDER BY start_date DESC
-        # pour que drop_duplicates ci-dessous conserve le plus récent en premier
+        # Accords actifs uniquement (end_date >= aujourd'hui), le plus récent en premier
+        # drop_duplicates conserve un seul accord par (fk_id_brand, fk_id_category)
         database_agreement = pd.read_sql(
             text("""
                 SELECT id_agreement, fk_id_brand, fk_id_category
@@ -338,25 +366,19 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
             connection
         )
 
-        # On garde le plus récent par (fk_id_brand, fk_id_category)
-        # en cas de doublons (accords actifs multiples pour la même marque/catégorie)
         database_agreement = database_agreement.drop_duplicates(
             subset=["fk_id_brand", "fk_id_category"], keep="first"
         )
 
-    # ── Étape 3b : Insertion des nouveaux produits ───────────────────────────
+    # ── Étape 3b : Insertion des nouveaux produits (format brut uniquement) ──
     if is_raw_format:
         _progression_bar(32, "Insertion des nouveaux produits…")
 
         with get_connection() as connection:
-            database_brand_reference        = pd.read_sql(text("SELECT id_brand, brand_name FROM brand"),                   connection)
-            database_category_reference     = pd.read_sql(text("SELECT id_category, category_name FROM category"),          connection)
-            database_unit_reference         = pd.read_sql(text("SELECT id_unit, unit_name FROM unit"),                      connection)
-            database_datasource_reference   = pd.read_sql(text("SELECT id_data_source, data_source_name FROM data_source"), connection)
-            database_brand_categories_agreement = pd.read_sql(
-                text("SELECT DISTINCT fk_id_brand, fk_id_category FROM agreement WHERE end_date >= CURDATE()"),
-                connection
-            )
+            database_brand_reference      = pd.read_sql(text("SELECT id_brand, brand_name FROM brand"),                   connection)
+            database_category_reference   = pd.read_sql(text("SELECT id_category, category_name FROM category"),          connection)
+            database_unit_reference       = pd.read_sql(text("SELECT id_unit, unit_name FROM unit"),                      connection)
+            database_datasource_reference = pd.read_sql(text("SELECT id_data_source, data_source_name FROM data_source"), connection)
 
         # Dictionnaires de correspondance {nom: id} pour les FK
         brand_id_map      = dict(zip(database_brand_reference["brand_name"],            database_brand_reference["id_brand"].astype(int)))
@@ -364,23 +386,21 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
         unit_id_map       = dict(zip(database_unit_reference["unit_name"],              database_unit_reference["id_unit"].astype(int)))
         datasource_id_map = dict(zip(database_datasource_reference["data_source_name"], database_datasource_reference["id_data_source"].astype(int)))
 
-        # Catégorie depuis les accords actifs : une marque avec un seul accord actif → catégorie directe
-        brand_to_category_id: dict = {}
-        for brand_id, group in database_brand_categories_agreement.groupby("fk_id_brand"):
-            categories_ids = group["fk_id_category"].unique()
-            if len(categories_ids) == 1:
-                brand_to_category_id[int(brand_id)] = int(categories_ids[0])
+        # product_name → category_name depuis le mapping (fruit du keyword matching)
+        product_name_to_category: dict = {
+            str(mapping_row["product_name"]): str(mapping_row["categories"])
+            for _, mapping_row in mapping_keywords.iterrows()
+            if pd.notna(mapping_row.get("product_name")) and pd.notna(mapping_row.get("categories"))
+        }
 
-        # Clé d'existence : (product_code, description, data_source) — product_name peut être NULL
-        existing_keys: set = set(
-            zip(
-                database_product["product_code"],
-                database_product["description"],
-                database_product["data_source"],
-            )
-        )
+        # Clé d'existence en base : (product_code, description, data_source)
+        existing_keys: set = set(zip(
+            database_product["product_code"],
+            database_product["description"],
+            database_product["data_source"],
+        ))
 
-        # Une ligne par (product_code, description, data_source) unique — on préfère les lignes avec product_name
+        # Une ligne par clé unique — préférer celles avec product_name renseigné
         unique_products_dataframe = (
             dataframe
             .sort_values("product_name", na_position="last")
@@ -391,35 +411,32 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
         seen_keys:    set  = set()
 
         for _, product_row in unique_products_dataframe.iterrows():
-            product_name  = product_row.get("product_name") if pd.notna(product_row.get("product_name")) else None
-            product_code  = str(product_row.get("product_code", ""))
-            description  = str(product_row.get("description",  ""))
-            data_source    = str(product_row.get("data_source",  ""))
-            key    = (product_code, description, data_source)
+            product_code = str(product_row.get("product_code", ""))
+            description = str(product_row.get("description",  ""))
+            data_source = str(product_row.get("data_source",  ""))
+            key = (product_code, description, data_source)
 
-            # existing_keys = déjà présent en base avant cet import
-            # seen_keys     = déjà traité plus tôt dans cette boucle (même clé dans le fichier)
+            # existing_keys = déjà présent en base
+            # seen_keys     = déjà rencontré dans le fichier importé (évite les doublons dans le même fichier)
             if key in existing_keys or key in seen_keys:
                 continue
 
-            brand_name = str(product_row["brand"])       if pd.notna(product_row.get("brand"))       else None
-            unit_name  = str(product_row["unit"])        if pd.notna(product_row.get("unit"))        else None
-            datasource_name    = str(product_row["data_source"]) if pd.notna(product_row.get("data_source")) else None
+            product_name = product_row.get("product_name") if pd.notna(product_row.get("product_name")) else None
+            brand_name = str(product_row["brand"]) if pd.notna(product_row.get("brand")) else None
+            unit_name = str(product_row["unit"]) if pd.notna(product_row.get("unit")) else None
+            datasource_name = str(product_row["data_source"]) if pd.notna(product_row.get("data_source")) else None
 
             id_brand = brand_id_map.get(brand_name) if brand_name else None
-
-            # Catégorie depuis les accords actifs en base de données
-            id_category = brand_to_category_id.get(id_brand) if id_brand else None
-            if not id_category:
-                id_category = category_id_map.get("Non catégorisé")
-
             id_unit = unit_id_map.get(unit_name) if unit_name else None
-            id_datasource   = datasource_id_map.get(datasource_name) if datasource_name else None
+            id_datasource = datasource_id_map.get(datasource_name) if datasource_name else None
+
+            # Catégorie depuis le keyword matching → "Non catégorisé" si non résolu
+            category_name = product_name_to_category.get(product_name) if product_name else None
+            id_category = category_id_map.get(category_name) if category_name else category_id_map.get("Non catégorisé")
 
             if not all([id_brand, id_category, id_unit, id_datasource]):
                 continue
 
-            # units_per_case calculé depuis la description au moment de l'insertion
             units_per_case = 1
             if description:
                 units_per_case_match = UPC_PATTERN.search(description)
@@ -432,43 +449,77 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
                 "fk_id_unit":        id_unit,
                 "fk_id_data_source": id_datasource,
                 "product_name":      product_name,
-                "product_code":      product_code if product_code else None,
-                "description":       description if description else None,
+                "product_code":      product_code or None,
+                "description":       description  or None,
                 "units_per_case":    units_per_case,
             })
             seen_keys.add(key)
 
         if new_products:
-            insert_products_sql = text(
-                """
-                INSERT INTO product
-                    (fk_id_brand, fk_id_category, fk_id_unit, fk_id_data_source,
-                    product_name, product_code, description, units_per_case)
-                VALUES
-                    (:fk_id_brand, :fk_id_category, :fk_id_unit, :fk_id_data_source,
-                    :product_name, :product_code, :description, :units_per_case)
-                """
-            )
-
             with get_connection() as connection:
                 for value in new_products:
-                    connection.execute(insert_products_sql, value)
+                    connection.execute(
+                        text("""
+                            INSERT INTO product
+                                (fk_id_brand, fk_id_category, fk_id_unit, fk_id_data_source,
+                                product_name, product_code, description, units_per_case)
+                            VALUES
+                                (:fk_id_brand, :fk_id_category, :fk_id_unit, :fk_id_data_source,
+                                :product_name, :product_code, :description, :units_per_case)
+                        """),
+                        value
+                    )
 
                 connection.commit()
 
-            # Recharger le catalogue pour que le merge Étape 4 trouve les nouveaux produits
+        # Mise à jour des produits existants dont product_name est encore NULL
+        # (ciblée par product_code + description pour ne pas écraser une valeur existante)
+        products_to_update = unique_products_dataframe[
+            unique_products_dataframe["product_name"].notna()
+        ]
+
+        products_to_update = products_to_update[
+            ["product_code", "description", "product_name"]
+        ]
+
+        products_to_update = products_to_update.drop_duplicates(
+            subset=["product_code", "description"]
+        )
+
+        if not products_to_update.empty:
             with get_connection() as connection:
-                database_product = pd.read_sql(
-                    text("""
-                        SELECT product.id_product, product.product_name, product.product_code, product.description,
+                for _, update_row in products_to_update.iterrows():
+                    connection.execute(
+                        text("""
+                            UPDATE product
+                            SET    product_name = :product_name
+                            WHERE  product_code = :product_code
+                                AND  description  = :description
+                                AND  product_name IS NULL
+                        """),
+                        {
+                            "product_name": update_row["product_name"],
+                            "product_code": update_row["product_code"],
+                            "description":  update_row["description"],
+                        },
+                    )
+
+                connection.commit()
+
+        # Recharger le catalogue pour que l'étape 4 trouve les produits nouvellement insérés
+        with get_connection() as connection:
+            database_product = pd.read_sql(
+                text("""
+                    SELECT product.id_product, product.product_name, product.product_code, product.description,
                         product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name AS data_source
-                        FROM product
-                        JOIN data_source data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
-                    """),
-                    connection
-                )
-                for column in ("product_code", "description", "data_source"):
-                    database_product[column] = database_product[column].fillna("").astype(str).replace("nan", "")
+                    FROM product
+                    JOIN data_source data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
+                """),
+                connection
+            )
+
+            for column in ("product_code", "description", "data_source"):
+                database_product[column] = database_product[column].fillna("").astype(str).replace("nan", "")
 
     # ── Étape 4 : Résolution des clés étrangères ─────────────────────────────
     _progression_bar(40, "Résolution des clés étrangères…")
@@ -503,16 +554,14 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
     # ── Étape 5 : Insertion des transactions ─────────────────────────────────
     _progression_bar(55, "Insertion des transactions…")
 
-    insert_sql = text(
-        """
+    insert_transaction_sql = text("""
         INSERT INTO `transaction`
             (fk_id_product, fk_id_agreement, fk_id_distributor,
             quantity, unit_price, total_price, transaction_date)
         VALUES
             (:fk_id_product, :fk_id_agreement, :fk_id_distributor,
             :quantity, :unit_price, :total_price, :transaction_date)
-        """
-    )
+    """)
 
     inserted      = 0
     null_fk_count = 0
@@ -520,17 +569,11 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
 
     with get_connection() as connection:
         for index_dataframe, (_, row) in enumerate(dataframe.iterrows()):
-            has_null = (
-                pd.isna(row.get("id_product"))
-                or pd.isna(row.get("id_agreement"))
-                or pd.isna(row.get("id_distributor"))
-            )
-
-            if has_null:
+            if (pd.isna(row.get("id_product")) or pd.isna(row.get("id_agreement")) or pd.isna(row.get("id_distributor"))):
                 null_fk_count += 1
 
             connection.execute(
-                insert_sql,
+                insert_transaction_sql,
                 {
                     "fk_id_product":     int(row["id_product"])     if pd.notna(row.get("id_product"))     else None,
                     "fk_id_agreement":   int(row["id_agreement"])   if pd.notna(row.get("id_agreement"))   else None,
@@ -552,9 +595,9 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
 
     return {
         "inserted": inserted,
-        "null_fk":  null_fk_count,
-        "total":    total,
-        "transaction_date_used": transaction_date.isoformat(),
+        "null_fk": null_fk_count,
+        "total": total,
+        "transaction_date_used": transaction_date.isoformat()
     }
 
 # -----
@@ -562,13 +605,18 @@ def import_transactions(param_file_path: str, param_progress_callback=None, para
 def import_agreements(param_file_path: str, param_progress_callback=None) -> dict:
     """
     Import d'un fichier Excel de mapping (format mapping_product.xlsx).
+
     Stratégie historique — aucune suppression :
-    - Accord identique (palier_group + prix inchangés)  → prolongation de end_date (même id_agreement)
-    - Accord modifié (palier_group ou prix différents)  → fermeture de l'ancien + création du nouveau
-    - Nouvel accord                                     → création
-    - Accord absent du nouveau fichier                  → fermeture (end_date = 31/12 année précédente)
-    - Produits existants                                → conservés intacts (units_per_case préservé)
-    - Nouveaux produits                                 → ajoutés uniquement
+    - Accord identique (palier_group + is_billed_per_case + prix inchangés)
+        → prolongation de end_date (même id_agreement)
+    - Accord modifié (l'un des éléments ci-dessus a changé)
+        → fermeture de l'ancien + création du nouveau
+    - Nouvel accord
+        → création
+    - Accord absent du nouveau fichier
+        → fermeture (end_date = 31/12 année précédente)
+
+    Les dates sont cadrées sur l'année civile courante (01/01 → 31/12).
     """
 
     # -----
@@ -590,10 +638,10 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     sheet      = "mapping_products" if "mapping_products" in excel_file.sheet_names else excel_file.sheet_names[0]
     mapping    = pd.read_excel(param_file_path, sheet_name=sheet)
 
-    required = {"brand", "categories", "product_name"}
+    required = {"brand", "categories", "is_billed_per_case"}
     missing  = required - set(mapping.columns)
     if missing:
-        raise ValueError(f"Colonnes manquantes : {missing}")
+        raise ValueError(f"Colonnes manquantes dans le fichier mapping : {missing}")
 
     # Normalisation des marques (correction des fautes de frappe, accents, etc.)
     mapping["brand"] = mapping["brand"].map(
@@ -605,13 +653,14 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         raise ValueError("Aucune colonne palier_* trouvée dans le fichier.")
 
     def _detect_palier_group(param_row):
-        """ Détecte le palier_group à partir des colonnes palier_* pour une ligne donnée (dressing+maizena+TVB | knorr) """
+        """ Détecte le palier_group depuis les colonnes palier_* (ex : 'knorr', 'dressing+maizena+TVB') """
 
         for column in palier_columns:
             if pd.notna(param_row.get(column)):
                 parsed = parse_palier_column_name_method(column)
                 if parsed:
                     return parsed[0]
+
         return None
 
     mapping["palier_group"] = mapping.apply(_detect_palier_group, axis=1)
@@ -641,7 +690,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
     with get_connection() as connection:
         database_agreement = pd.read_sql(
-            text("SELECT id_agreement, fk_id_brand, fk_id_category, palier_group, end_date FROM agreement"),
+            text("SELECT id_agreement, fk_id_brand, fk_id_category, palier_group, is_billed_per_case, end_date FROM agreement"),
             connection
         )
 
@@ -666,7 +715,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # -----
 
     def _database_tier_structure(param_id_agreement: int) -> dict:
-        """ Retourne la structure des paliers {(min_uvc, max_uvc): price} pour un accord existant en base """
+        """ Retourne {(min_uvc, max_uvc): price} pour un accord existant en base """
 
         agreement_tiers = database_agreement_tiers[database_agreement_tiers["fk_id_agreement"] == param_id_agreement]
 
@@ -678,14 +727,14 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # -----
 
     def _excel_tier_structure(param_brand_name: str, param_category_name: str, param_palier_group: str) -> dict:
-        """ Retourne la structure des paliers {(min_uvc, max_uvc): price} depuis les colonnes palier du fichier Excel """
+        """ Retourne {(min_uvc, max_uvc): price} depuis les colonnes palier du fichier Excel """
 
         reference_rows = mapping[(mapping["brand"] == param_brand_name) & (mapping["categories"] == param_category_name)]
         if reference_rows.empty:
             return {}
 
         reference_row = reference_rows.iloc[0]
-        result  = {}
+        result = {}
         for column in palier_columns:
             parsed = parse_palier_column_name_method(column)
             if not parsed:
@@ -704,7 +753,9 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # -----
 
     # ── Étape 4 : Construction de la liste de travail ────────────────────
-    mapping_work = mapping[["brand", "categories", "palier_group"]].drop_duplicates().copy()
+
+    # copy() pour éviter le SettingWithCopyWarning lors de l'itération sur mapping_work
+    mapping_work = mapping[["brand", "categories", "palier_group", "is_billed_per_case"]].drop_duplicates(subset=["brand", "categories"]).copy()
     mapping_work = mapping_work.merge(
         database_brand.rename(columns={"brand_name": "brand"}), on="brand", how="left"
     )
@@ -712,7 +763,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         database_category.rename(columns={"category_name": "categories"}), on="categories", how="left"
     )
 
-    # ── Étape 5 : Catégorisation des accords ─────────────────────────────
+    # ── Étape 5 : Catégorisation des accords (créer / prolonger / fermer) ────
     _progression_bar(30, "Analyse des accords à créer, prolonger ou fermer…")
 
     current_year   = date.today().year
@@ -720,11 +771,11 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     end_date_new   = date(current_year, 12, 31)
     end_date_close = date(current_year - 1, 12, 31)
 
-    to_extend: list = []   # id_agreement → prolonger end_date jusqu'à fin année courante
-    to_close:  list = []   # id_agreement → fermer à fin année précédente
-    to_create: list = []   # work_row Series → insérer comme nouvel accord
+    to_extend: list = []  # [id_agreement] → prolonger end_date jusqu'à fin année courante
+    to_close:  list = []  # [id_agreement] → fermer à fin année précédente
+    to_create: list = []  # [work_row]     → insérer comme nouvel accord
 
-    new_keys: set = set()  # (id_brand, id_category) présents dans le nouveau fichier
+    new_keys: set = set()
 
     # Parcours du fichier Excel pour déterminer les actions à mener sur les accords
     # (création, prolongation, fermeture) en comparant avec les accords en base de données
@@ -735,6 +786,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         id_brand_int    = int(work_row["id_brand"])
         id_category_int = int(work_row["id_category"])
         palier_group    = work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None
+        billed_per_case = int(work_row.get("is_billed_per_case", 0))
         new_keys.add((id_brand_int, id_category_int))
 
         existing = most_recent_by_key.get((id_brand_int, id_category_int))
@@ -743,13 +795,24 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
             # Aucun accord existant → créer
             to_create.append(work_row)
         else:
-            existing_id  = int(existing["id_agreement"])
-            existing_group = existing.get("palier_group") if pd.notna(existing.get("palier_group")) else None
+            existing_id = int(existing["id_agreement"])
+            existing_palier_group = existing.get("palier_group") if pd.notna(existing.get("palier_group")) else None
+            existing_billed = int(existing.get("is_billed_per_case", 0))
 
-            fingerprint_database = _database_tier_structure(param_id_agreement=existing_id)
-            fingerprint_excel = _excel_tier_structure(param_brand_name=work_row["brand"], param_category_name=work_row["categories"], param_palier_group=palier_group)
+            structure_database = _database_tier_structure(param_id_agreement=existing_id)
+            structure_excel = _excel_tier_structure(
+                param_brand_name=work_row["brand"],
+                param_category_name=work_row["categories"],
+                param_palier_group=palier_group
+            )
 
-            if existing_group == palier_group and fingerprint_database == fingerprint_excel:
+            accord_unchanged = (
+                existing_palier_group == palier_group
+                and existing_billed == billed_per_case
+                and structure_database == structure_excel
+            )
+
+            if accord_unchanged:
                 # Accord identique → prolonger end_date (même id_agreement conservé)
                 to_extend.append(existing_id)
             else:
@@ -757,7 +820,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                 to_close.append(existing_id)
                 to_create.append(work_row)
 
-    # Accord le plus récent en base absent du nouveau fichier → fermer
+    # Accords présents en base mais absents du nouveau fichier → fermer
     for agreement_key, agreement_row in most_recent_by_key.items():
         if agreement_key not in new_keys:
             to_close.append(int(agreement_row["id_agreement"]))
@@ -783,18 +846,16 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # ── Étape 7 : Insertion des nouveaux accords ──────────────────────────
     _progression_bar(50, "Insertion des nouveaux accords…")
 
-    insert_agreement_sql = text(
-        """
+    insert_agreement_sql = text("""
         INSERT INTO agreement
             (fk_id_brand, fk_id_category, fk_id_industrial, fk_id_unit,
-            palier_group, start_date, end_date)
+            palier_group, is_billed_per_case, start_date, end_date)
         VALUES
             (:fk_id_brand, :fk_id_category, :fk_id_industrial, :fk_id_unit,
-            :palier_group, :start_date, :end_date)
-        """
-    )
+            :palier_group, :is_billed_per_case, :start_date, :end_date)
+    """)
 
-    new_agreement_rows: list = []  # [(work_row, id_agreement), ...]
+    new_agreement_rows: list = []
     with get_connection() as connection:
         for work_row in to_create:
             result = connection.execute(
@@ -805,6 +866,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                     "fk_id_industrial": id_industrial,
                     "fk_id_unit":       id_unit_uvc,
                     "palier_group":     work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None,
+                    "is_billed_per_case": int(work_row.get("is_billed_per_case", 0)),
                     "start_date":       start_date_new,
                     "end_date":         end_date_new,
                 },
@@ -816,12 +878,10 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # ── Étape 8 : Insertion des paliers pour les nouveaux accords ─────────
     _progression_bar(80, "Insertion des paliers…")
 
-    insert_tier_sql = text(
-        """
+    insert_tier_sql = text("""
         INSERT INTO agreement_tier (fk_id_agreement, min_uvc, max_uvc, price)
         VALUES (:fk_id_agreement, :min_uvc, :max_uvc, :price)
-        """
-    )
+    """)
 
     tier_count = 0
     with get_connection() as connection:

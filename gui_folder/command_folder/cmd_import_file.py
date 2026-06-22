@@ -41,12 +41,13 @@ class ImportWorker(QThread):
 
     # -----
 
-    def __init__(self, param_file_type: str, param_file_path: str) -> None:
+    def __init__(self, param_file_type: str, param_file_path: str, param_mapping_path: str | None = None) -> None:
         """ Initialisation avec le type d'import ('transactions' ou 'accords') et le chemin du fichier """
 
         super().__init__()
-        self.file_type = param_file_type
-        self.file_path = param_file_path
+        self.file_type    = param_file_type
+        self.file_path    = param_file_path
+        self.mapping_path = param_mapping_path
 
         return None
 
@@ -58,7 +59,7 @@ class ImportWorker(QThread):
         try:
             # Choix de la fonction selon le type d'import
             if self.file_type == "transactions":
-                import_result = import_transactions(self.file_path, self.progress.emit)
+                import_result = import_transactions(self.file_path, self.progress.emit, param_mapping_path=self.mapping_path)
             else:
                 import_result = import_agreements(self.file_path, self.progress.emit)
 
@@ -123,6 +124,17 @@ class CmdImportPageClass(GuiImportPageClass):
         if not file_path:
             return
 
+        # Pour les transactions au format brut, demander le fichier de mapping
+        mapping_path: str | None = None
+        if param_file_type == "transactions":
+            mapping_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Sélectionner mapping_product.xlsx (requis pour format brut)",
+                "",
+                "Fichiers Excel (*.xlsx)",
+            )
+            mapping_path = mapping_path or None
+
         # Confirmation obligatoire avant l'import des accords (opération destructive)
         if param_file_type == "accords":
             reply = QMessageBox.question(
@@ -160,7 +172,7 @@ class CmdImportPageClass(GuiImportPageClass):
         self.button_import_accords.setEnabled(False)
 
         # Démarrage du thread d'import
-        self._import_worker = ImportWorker(param_file_type, file_path)
+        self._import_worker = ImportWorker(param_file_type=param_file_type, param_file_path=file_path, param_mapping_path=mapping_path)
         self._import_worker.progress.connect(self.on_import_progress_method)
         self._import_worker.finished.connect(self.on_import_finished_method)
         self._import_worker.error.connect(self.on_import_error_method)

@@ -93,14 +93,15 @@ CREATE TABLE `product` (
 
 DROP TABLE IF EXISTS `agreement`;
 CREATE TABLE `agreement` (
-    `id_agreement`      INT NOT NULL AUTO_INCREMENT,
-    `fk_id_brand`       INT NOT NULL,
-    `fk_id_category`    INT NOT NULL,
-    `fk_id_industrial`  INT NOT NULL,
-    `fk_id_unit`        INT NOT NULL,
-    `palier_group`      VARCHAR(255) NULL,
-    `start_date`        DATE NULL,
-    `end_date`          DATE NULL,
+    `id_agreement`       INT NOT NULL AUTO_INCREMENT,
+    `fk_id_brand`        INT NOT NULL,
+    `fk_id_category`     INT NOT NULL,
+    `fk_id_industrial`   INT NOT NULL,
+    `fk_id_unit`         INT NOT NULL,
+    `palier_group`       VARCHAR(255) NULL,
+    `is_billed_per_case` TINYINT(1) NOT NULL DEFAULT 0,
+    `start_date`         DATE NULL,
+    `end_date`           DATE NULL,
     PRIMARY KEY (`id_agreement`),
     FOREIGN KEY (`fk_id_brand`)
         REFERENCES `brand`(`id_brand`)

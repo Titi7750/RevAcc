@@ -57,7 +57,7 @@ get_connection = get_connection_method
 # -----
 
 def get_or_create(param_connection, param_table: str, param_column_name: str, param_value: str | None) -> int | None:
-    """ Retourne l'ID d'une ligne de référence existante, ou insère et retourne le nouvel ID """
+    """ Retourne l'ID associé à une valeur, crée la ligne si elle n'existe pas """
 
     if param_value is None:
         return None
@@ -83,7 +83,7 @@ def get_or_create(param_connection, param_table: str, param_column_name: str, pa
 # -----
 
 def get_or_create_many(param_connection, param_table: str, param_column_name: str, param_values) -> dict:
-    """ Applique get_or_create à toutes les valeurs uniques non-nulles. Retourne {value: id} """
+    """ Applique get_or_create aux valeurs uniques valides, retourne un dictionnaire {value: id} """
 
     unique_values = {value for value in param_values if value is not None and str(value) not in ("", "nan")}
 
