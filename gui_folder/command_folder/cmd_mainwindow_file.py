@@ -16,7 +16,7 @@ from gui_folder.command_folder.cmd_import_file import CmdImportPageClass
 from gui_folder.command_folder.cmd_calculation_file import CmdCalculationPageClass
 from gui_folder.command_folder.cmd_consultation_file import CmdConsultationPageClass
 # -----
-from core_folder.calculation_file import load_dashboard_kpis_method
+from core_folder.dashboard_file import load_dashboard_kpis_method
 # Custom variable type construction
 ## None
 
@@ -129,8 +129,10 @@ class CmdMainWindowClass(GuiMainWindowClass):
 
         # Mise à jour des cartes (le KPI revenu est géré séparément par on_calculation_done_method)
         self.kpi_accords.value_label.setText(str(kpis["accords"]))
-        self.kpi_produits.value_label.setText(str(kpis["produits"]))
-        self.kpi_a_verifier.value_label.setText(str(kpis["a_verifier"]))
+        self.kpi_produits.value_label.setText(str(kpis["products"]))
+        self.kpi_product_to_be_verified.value_label.setText(str(kpis["product_to_be_verified"]))
+        self.kpi_agreement_to_be_verified.value_label.setText(str(kpis["agreement_to_be_verified"]))
+        self.kpi_distributor_to_be_verified.value_label.setText(str(kpis["distributor_to_be_verified"]))
 
         return None
 
