@@ -61,21 +61,21 @@ class GuiConsultationPageClass(QWidget):
 
         # Onglets principaux
         self.table_consult_products = self.make_table_method(
-            ["ID", "Produit", "Marque - Catégorie", "Unité", "Statut"]
+            ["Produit", "Marque - Catégorie", "Unité", "Statut"]
         )
         self.table_consult_accords = self.make_table_method(
-            ["ID", "Industriel", "Marque - Catégorie", "Période", "Taux", "Statut"]
+            ["Industriel", "Marque - Catégorie", "Période", "Taux", "Statut"]
         )
         self.table_consult_transactions = self.make_table_method(
-            ["ID", "Date", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"]
+            ["Date", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"]
         )
 
         # Onglets référentiels
-        self.table_consult_brands       = self.make_table_method(["ID", "Marque"])
-        self.table_consult_categories   = self.make_table_method(["ID", "Catégorie"])
-        self.table_consult_distributors = self.make_table_method(["ID", "Distributeur"])
-        self.table_consult_industrials  = self.make_table_method(["ID", "Industriel"])
-        self.table_consult_units        = self.make_table_method(["ID", "Unité"])
+        self.table_consult_brands       = self.make_table_method(["Marque"])
+        self.table_consult_categories   = self.make_table_method(["Catégorie"])
+        self.table_consult_distributors = self.make_table_method(["Distributeur"])
+        self.table_consult_industrials  = self.make_table_method(["Industriel"])
+        self.table_consult_units        = self.make_table_method(["Unité"])
 
         # Ajout des onglets dans le TabWidget
         self.consultation_tabs.addTab(self.table_consult_products,     "Produits")

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import QMessageBox, QTableWidgetItem
 # Import personal functions
 from gui_folder.graphic_folder.gui_consultation_file import GuiConsultationPageClass
 # -----
-from core_folder.calculation_file import (
+from core_folder.consultation_file import (
     load_consultation_products_method,
     load_consultation_agreements_method,
     load_all_transactions_method,
