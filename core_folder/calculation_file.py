@@ -65,9 +65,9 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
                     transaction.fk_id_distributor,
                     transaction.fk_id_agreement,
                     SUM(
-                        CASE WHEN agreement.is_billed_per_case = 1
-                            THEN transaction.quantity
-                        ELSE transaction.quantity * product.units_per_case
+                        CASE
+                            WHEN agreement.is_billed_per_case = 1 THEN transaction.quantity
+                            ELSE transaction.quantity * product.units_per_case
                         END
                     ) AS uvc
                 FROM transaction
@@ -131,7 +131,7 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         # Comptage simple pour alimenter le résumé final (summary["transactions"])
         # Ne filtre que les transactions avec accord résolu — les 13 non matchés sont exclus
         transaction_count = connection.execute(
-            text("SELECT COUNT(*) FROM `transaction` WHERE fk_id_agreement IS NOT NULL")
+            text("SELECT COUNT(*) FROM transaction WHERE fk_id_agreement IS NOT NULL")
         ).scalar() or 0
 
     # ── Étape 2 : Enrichissement et agrégation ────────────────────────────────
@@ -173,13 +173,25 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
 
     # Construit un dictionnaire d'accès rapide aux paliers : {id_agreement: [liste de paliers]}
     # Évite de refiltrer le DataFrame à chaque itération de la boucle principale —
-    # un simple .get(agreement_id) suffit pour récupérer les 3 paliers d'un accord
+    # un simple .get(agreement_id) - ligne 226 suffit pour récupérer les 3 paliers d'un accord
     tiers_by_agreement: dict = {}
     for _, tier_row in dataframe_agreement_tiers.iterrows():
         foreign_key = int(tier_row["fk_id_agreement"])
         tiers_by_agreement.setdefault(foreign_key, []).append(tier_row)
 
     # ── Étape 3 : Résolution du palier et calcul du revenu ───────────────────
+
+    # Reset préalable : remet à NULL toutes les colonnes agreement_* pour éviter
+    # de conserver des valeurs obsolètes d'un run précédent
+    with get_connection() as connection:
+        connection.execute(text("""
+            UPDATE transaction
+            SET fk_id_agreement_tier  = NULL,
+                agreement_unit_price  = NULL,
+                agreement_total_price = NULL
+            WHERE fk_id_agreement IS NOT NULL
+        """))
+        connection.commit()
 
     # results : liste des résultats à retourner à l'interface pour affichage
     # transactions_to_update : liste des mises à jour à appliquer en base (étape 4)
@@ -190,7 +202,7 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
     for index, (_, row) in enumerate(dataframe.iterrows()):
         _progression_bar(50 + int(35 * index / max(total, 1)), f"Accord {index + 1}/{total}…")
 
-        # Extraction des valeurs de la ligne courante avec des noms explicites
+        # Extraction des valeurs la ligne par ligne
         # Les str() et or "N/A" protègent contre les valeurs NULL
         # comme NaN depuis pandas, ce qui provoquerait des erreurs à l'affichage
         agreement_id   = int(row["fk_id_agreement"])
@@ -210,19 +222,22 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         group_uvc     = int(group_uvc_raw) if pd.notna(group_uvc_raw) else uvc_accord
 
         # Récupère les paliers de cet accord et les trie du plus élevé au plus bas
-        # On teste d'abord le palier le plus haut : dès qu'on trouve un intervalle
-        # [min_uvc, max_uvc] qui contient group_uvc, c'est le palier applicable
         tiers = sorted(
             tiers_by_agreement.get(agreement_id, []),
             key=lambda tier: int(tier["min_uvc"]),
             reverse=True
         )
 
+        # On teste d'abord le palier le plus haut : dès qu'on trouve un intervalle
+        # [min_uvc, max_uvc] qui contient group_uvc, c'est le palier applicable
         applicable_tier = None
         for tier in tiers:
             min_uvc = int(tier["min_uvc"])
             max_uvc = int(tier["max_uvc"]) if pd.notna(tier["max_uvc"]) else None
 
+            # group_uvc >= min_uvc → la quantité atteint le seuil bas du palier
+            # max_uvc is None      → le palier est ouvert ("40 000 et plus") : pas de borne haute
+            # group_uvc <= max_uvc → la quantité ne dépasse pas la borne haute
             if group_uvc >= min_uvc and (max_uvc is None or group_uvc <= max_uvc):
                 applicable_tier = tier
                 break
@@ -307,33 +322,6 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         with get_connection() as connection:
             for update_transaction in transactions_to_update:
                 connection.execute(update_sql, update_transaction)
-
-            connection.commit()
-
-    # Idem : si le calcul est relancé après une modification des données
-    # (nouveau fichier importé, accord mis à jour...), certains
-    # peuvent ne plus atteindre de palier. On remet leurs colonnes agreement_* à NULL
-    # pour ne pas laisser des valeurs obsolètes du run précédent.
-    agreements_updated = {(update_transaction["fk_id_agreement"], update_transaction["fk_id_distributor"]) for update_transaction in transactions_to_update}
-    agreements_all = {(int(row["fk_id_agreement"]), int(row["fk_id_distributor"])) for _, row in dataframe.iterrows()}
-    agreements_no_tier = agreements_all - agreements_updated
-
-    if agreements_no_tier:
-        reset_sql = text("""
-            UPDATE transaction
-            SET fk_id_agreement_tier  = NULL,
-                agreement_unit_price  = NULL,
-                agreement_total_price = NULL
-            WHERE fk_id_agreement     = :fk_id_agreement
-                AND fk_id_distributor = :fk_id_distributor
-        """)
-
-        with get_connection() as connection:
-            for agreement_id, distributor_id in agreements_no_tier:
-                connection.execute(reset_sql, {
-                    "fk_id_agreement":   agreement_id,
-                    "fk_id_distributor": distributor_id,
-                })
 
             connection.commit()
 
