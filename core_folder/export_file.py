@@ -18,7 +18,7 @@ from core_folder.database_file import get_connection
 
 # -----
 
-def export_calculation_method(param_file_path: str, param_results: list) -> None:
+def export_calculation_method(param_file_path: str, param_results: list, param_summary: dict) -> None:
     """ Exporte les résultats de calcul dans un fichier Excel (deux feuilles : Résumé + Transactions) """
 
     dataframe_resume = pd.DataFrame([{
@@ -27,11 +27,27 @@ def export_calculation_method(param_file_path: str, param_results: list) -> None
         "Marque":           result["brand"],
         "Catégorie":        result["category"],
         "Total UVC":        result["total_uvc"],
-        "CA déclaré (€)":   round(result["total_ca"], 2),
         "Taux accord":      result["tier_price"],
-        "Revenu (€)":       round(result["revenue"], 2),
         "Détail du calcul": result["detail"]
     } for result in param_results])
+
+    # Totaux globaux depuis summary — écrits sur la même feuille sous le tableau principal
+    revenue_by_group = param_summary.get("revenue_by_group", {})
+
+    # Création d'un DataFrame pour les totaux par groupe d'accords
+    dataframe_totaux = pd.DataFrame([
+        {
+            "Accord": agreement_name,
+            "Revenu (€)": revenue,
+        }
+        for agreement_name, revenue in revenue_by_group.items()
+    ])
+
+    # Ajout d'une ligne pour le total global
+    dataframe_totaux.loc[len(dataframe_totaux)] = {
+        "Accord": "Total",
+        "Revenu (€)": param_summary.get("total_revenue", 0.0),
+    }
 
     with get_connection() as connection:
         dataframe_transactions = pd.read_sql(
@@ -58,4 +74,8 @@ def export_calculation_method(param_file_path: str, param_results: list) -> None
 
     with pd.ExcelWriter(param_file_path, engine="openpyxl") as writer:
         dataframe_resume.to_excel(writer, sheet_name="Résumé", index=False)
+        # Les totaux sont écrits sur la même feuille, deux lignes sous le tableau principal
+        # (une ligne de données + une ligne vide de séparation)
+        start_row_totaux = len(dataframe_resume) + 2
+        dataframe_totaux.to_excel(writer, sheet_name="Résumé", index=False, startrow=start_row_totaux)
         dataframe_transactions.to_excel(writer, sheet_name="Transactions", index=False)

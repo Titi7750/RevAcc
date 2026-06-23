@@ -154,7 +154,7 @@ class CmdCalculationPageClass(GuiCalculationPageClass):
             return
 
         try:
-            export_calculation_method(file_path, param_results)
+            export_calculation_method(file_path, param_results, param_summary)
             QMessageBox.information(self, "Export réussi", f"Fichier enregistré :\n{file_path}")
         except Exception as exc:
             QMessageBox.critical(self, "Erreur d'export", str(exc))

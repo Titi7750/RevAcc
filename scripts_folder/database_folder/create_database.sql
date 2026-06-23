@@ -140,14 +140,17 @@ CREATE TABLE `agreement_tier` (
 
 DROP TABLE IF EXISTS `transaction`;
 CREATE TABLE `transaction` (
-    `id_transaction`    INT NOT NULL AUTO_INCREMENT,
-    `fk_id_product`     INT NULL,
-    `fk_id_agreement`   INT NULL,
-    `fk_id_distributor` INT NULL,
-    `quantity`          INT NOT NULL,
-    `unit_price`        DECIMAL(10, 2) NOT NULL, -- unit price at the time of transaction
-    `total_price`       DECIMAL(10, 2) NOT NULL,
-    `transaction_date`  DATE NULL,
+    `id_transaction`        INT NOT NULL AUTO_INCREMENT,
+    `fk_id_product`         INT NULL,
+    `fk_id_agreement`       INT NULL,
+    `fk_id_agreement_tier`  INT NULL, -- Quel palier de l'accord - Historique
+    `fk_id_distributor`     INT NULL,
+    `quantity`              INT NOT NULL,
+    `unit_price`            DECIMAL(10, 2) NOT NULL,
+    `agreement_unit_price`  DECIMAL(10, 2) NULL, -- Quel prix unitaire de l'accord - Historique
+    `total_price`           DECIMAL(10, 2) NOT NULL,
+    `agreement_total_price` DECIMAL(10, 2) NULL, -- Quel prix total de l'accord - Historique + source des totaux
+    `transaction_date`      DATE NULL,
     PRIMARY KEY (`id_transaction`),
     FOREIGN KEY (`fk_id_product`)
         REFERENCES `product`(`id_product`)
@@ -155,6 +158,9 @@ CREATE TABLE `transaction` (
     FOREIGN KEY (`fk_id_agreement`)
         REFERENCES `agreement`(`id_agreement`)
         ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`fk_id_agreement_tier`)
+        REFERENCES `agreement_tier`(`id_agreement_tier`)
+        ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_distributor`)
         REFERENCES `distributor`(`id_distributor`)
         ON DELETE CASCADE ON UPDATE CASCADE
