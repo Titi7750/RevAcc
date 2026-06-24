@@ -19,11 +19,11 @@ data_source ──────────────────────�
 category ───────────────────────────┘
 
 brand ──────────────────────────────┬──▶ agreement ──▶ agreement_tier
-category ───────────────────────────┤
-unit ───────────────────────────────┤
-industrial ─────────────────────────┘
-
-product ─────────────────────────────┬──▶ transaction
+category ───────────────────────────┤                        │
+unit ───────────────────────────────┤                        │
+industrial ─────────────────────────┘                        │
+                                                             │
+product ─────────────────────────────┬──▶ transaction ◀─────┘
 agreement ───────────────────────────┤
 distributor ─────────────────────────┘
 ```
@@ -119,13 +119,15 @@ Produits commercialisés, rattachés à une marque, une catégorie et une source
 | `product_name` | VARCHAR(255) | NULL | Nom du produit (peut être absent si non mappé) |
 | `product_code` | VARCHAR(255) | NULL | Code du produit |
 | `description` | TEXT | NULL | Description libre |
+| `product_date` | DATE | NULL | Date associée au produit |
+| `units_per_case` | INT | NOT NULL, DEFAULT 1 | Nombre d'UVC par colis — extrait de la description à l'import; utilisé pour la conversion colis → UVC lors du calcul du revenu |
 
 ---
 
 ### `agreement`
 Accord de reversement entre un industriel et **Entegra**, pour une marque et une catégorie données sur une période définie.
 
-> **Choix de conception** : Entegra étant toujours le signataire côté acheteur, elle n'est pas stockée comme FK — ce serait une valeur constante sans intérêt analytique. Un accord est la table de jonction implicite entre `brand`, `category` et `industrial`.
+> **Choix de conception** : Entegra étant toujours le signataire, elle n'est pas stockée comme FK — ce serait une valeur constante sans intérêt analytique. Un accord est la table de jonction implicite entre `brand`, `category` et `industrial`. Le champ `palier_group` permet de regrouper plusieurs accords (marques/catégories différentes) sous un même compteur de volume pour le calcul du palier — par exemple, tous les accords Knorr partagent le même `palier_group` et leurs UVC sont additionnées pour déterminer le palier commun.
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -134,6 +136,8 @@ Accord de reversement entre un industriel et **Entegra**, pour une marque et une
 | `fk_id_category` | INT | FK → `category`, NOT NULL | Catégorie concernée |
 | `fk_id_industrial` | INT | FK → `industrial`, NOT NULL | Industriel signataire |
 | `fk_id_unit` | INT | FK → `unit`, NOT NULL | Unité de vente pour les paliers |
+| `palier_group` | VARCHAR(255) | NULL | Groupe de palier partagé entre plusieurs accords (ex : `knorr`, `dressing+maizena+tvb`) |
+| `is_billed_per_case` | TINYINT(1) | NOT NULL, DEFAULT 0 | `1` si le palier est exprimé en colis et non en UVC (ex : Amora - Dosette) |
 | `start_date` | DATE | NULL | Date de début de l'accord |
 | `end_date` | DATE | NULL | Date de fin de l'accord |
 
@@ -158,7 +162,7 @@ Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume 
 | `fk_id_agreement` | INT | FK → `agreement`, NOT NULL | Accord parent |
 | `min_uvc` | INT | NOT NULL | Borne inférieure du palier (incluse) |
 | `max_uvc` | INT | NULL | Borne supérieure du palier (NULL = pas de plafond) |
-| `price` | FLOAT | NOT NULL | Prix de reversement pour ce palier (€) |
+| `price` | DECIMAL(10,2) | NOT NULL | Prix de reversement pour ce palier (€) |
 
 ---
 
@@ -166,20 +170,25 @@ Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume 
 Vente effective d'un produit, dans le cadre d'un accord commercial.
 
 > **Choix de conception** :
-> - `fk_id_agreement` permet de remonter à l'accord, puis aux paliers (`agreement_tier`), pour calculer le reversement applicable au moment de la vente.
-> - `fk_id_distributor` identifie quel distributeur (client d'Entegra) a passé la commande.
-> - `total_price` est un snapshot historique (`quantity × unit_price`). Il ne doit pas être recalculé dynamiquement : il capture le prix au moment exact de la transaction.
+> - `fk_id_agreement` permet de remonter à l'accord applicable au moment de la vente.
+> - `fk_id_agreement_tier` identifie le palier précis qui a été atteint lors du calcul.
+> - `fk_id_distributor` identifie quel est le distributeur.
+> - `unit_price` et `total_price` sont les prix de vente réel au moment de la transaction. Ils ne doivent pas être recalculés dynamiquement.
+> - `agreement_unit_price` et `agreement_total_price` sont les colonnes de reversement, renseignées par le Bouton de calcul. Elles restent `NULL` jusqu'au lancement du calcul. `agreement_total_price` est la source utilisée pour les totaux de revenu.
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
 | `id_transaction` | INT | PK, AUTO_INCREMENT | Identifiant unique |
-| `fk_id_product` | INT | FK → `product`, NOT NULL | Produit vendu |
-| `fk_id_agreement` | INT | FK → `agreement`, NOT NULL | Accord applicable |
-| `fk_id_distributor` | INT | FK → `distributor`, NOT NULL | Distributeur acheteur |
-| `quantity` | INT | NOT NULL | Quantité vendue (UVC) |
-| `unit_price` | DECIMAL(10,2) | NOT NULL | Prix unitaire au moment de la vente (€) |
-| `total_price` | DECIMAL(10,2) | NOT NULL | Montant total = quantity × unit_price (snapshot) |
-| `transaction_date` | DATE | NOT NULL | Date de la transaction |
+| `fk_id_product` | INT | FK → `product`, NULL | Produit vendu |
+| `fk_id_agreement` | INT | FK → `agreement`, NULL | Accord applicable (NULL si produit non mappé) |
+| `fk_id_agreement_tier` | INT | FK → `agreement_tier`, NULL | Palier atteint lors du calcul (NULL avant calcul) |
+| `fk_id_distributor` | INT | FK → `distributor`, NULL | Distributeur |
+| `quantity` | INT | NOT NULL | Quantité vendue en colis |
+| `unit_price` | DECIMAL(10,2) | NOT NULL | Prix unitaire au moment de la vente |
+| `agreement_unit_price` | DECIMAL(10,2) | NULL | Prix du palier de reversement (€/UVC) — renseigné par le calcul |
+| `total_price` | DECIMAL(10,2) | NOT NULL | Montant total de vente |
+| `agreement_total_price` | DECIMAL(10,2) | NULL | Revenu de reversement = UVC × agreement_unit_price — renseigné par le calcul |
+| `transaction_date` | DATE | NULL | Date de la transaction |
 
 ---
 
