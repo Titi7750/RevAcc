@@ -139,6 +139,7 @@ def find_product_name_method(param_row: pd.Series, param_mapping: pd.DataFrame) 
             if keyword_brand.strip()
         ]
 
+        # Si les mots-clés de la marque ne correspondent pas, passez à la règle suivante
         if not any(keyword_brand in brand_norm for keyword_brand in keywords_brands):
             continue
 
@@ -288,6 +289,8 @@ def import_transactions(
             )
 
         mapping_keywords = pd.read_excel(param_mapping_path, sheet_name="mapping_products")
+
+        # On boucle sur chaque ligne du dataframe pour trouver le product_name correspondant via le keyword matching
         dataframe["product_name"] = dataframe.apply(
             lambda row: find_product_name_method(row, mapping_keywords), axis=1
         )
