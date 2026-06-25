@@ -23,13 +23,12 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
     Calcule des revenus des accords
 
     Logique :
-    1. Calculer les UVC par (distributeur x accord) :
-        - is_billed_per_case = 0 → uvc = quantity x units_per_case
-        - is_billed_per_case = 1 → uvc = quantity  (ex : Amora - Dosette, compté en colis)
-    2. Sommer les UVC de tous les accords du même palier_group, tous distributeurs confondus
-        → UVC totale du groupe (commune à tous les distributeurs)
-    3. Déterminer le palier applicable depuis l'UVC totale du groupe
-    4. Revenu par accord = uvc_accord x prix_palier (€/UVC)
+    1. Calculer le volume par (distributeur x accord) :
+        volume = quantity x conversion_factor (depuis la table product_conversion, renseigné par le client)
+    2. Sommer le volume de tous les accords du même palier_group, tous distributeurs confondus
+        → Volume total du groupe (commun à tous les distributeurs)
+    3. Déterminer le palier applicable depuis le volume total du groupe
+    4. Revenu par accord = volume_accord x prix_palier (€/UVC)
     5. Mettre à jour fk_id_agreement_tier, agreement_unit_price, agreement_total_price dans la table transaction
 
     Si un distributeur n'atteint aucun seuil pour un groupe, les colonnes agreement
@@ -52,11 +51,9 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
     _progression_bar(0, "Chargement des transactions…")
 
     with get_connection() as connection:
-        # Charge les UVC par (distributeur x accord) depuis la base
-        # Le CASE WHEN gère l'exception Amora Dosette (is_billed_per_case = 1) :
-        # pour cette catégorie, on compte en colis (quantity directement) plutôt
-        # qu'en unités (quantity x units_per_case). Pour tous les autres produits,
-        # on applique le facteur de conversion extrait de la description à l'import
+        # Charge le volume par (distributeur x accord) depuis la base
+        # Le facteur de conversion provient de product_conversion (renseigné par le client)
+        # COALESCE(conversion_factor, 1) sécurise le cas où la correspondance est absente
         # Le GROUP BY agrège toutes les transactions d'un même distributeur pour un
         # même accord en une seule ligne — c'est l'unité de travail du calcul
         dataframe_transaction = pd.read_sql(
@@ -65,14 +62,16 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
                     transaction.fk_id_distributor,
                     transaction.fk_id_agreement,
                     SUM(
-                        CASE
-                            WHEN agreement.is_billed_per_case = 1 THEN transaction.quantity
-                            ELSE transaction.quantity * product.units_per_case
-                        END
-                    ) AS uvc
+                        transaction.quantity * COALESCE(product_conversion.conversion_factor, 1)
+                    ) AS volume
                 FROM transaction
-                JOIN product   ON product.id_product   = transaction.fk_id_product
-                JOIN agreement ON agreement.id_agreement = transaction.fk_id_agreement
+                JOIN product ON product.id_product = transaction.fk_id_product
+                JOIN distributor ON distributor.id_distributor = transaction.fk_id_distributor
+                JOIN unit ON unit.id_unit = product.fk_id_unit
+                LEFT JOIN product_conversion
+                    ON  product_conversion.distributor_name = distributor.distributor_name
+                    AND product_conversion.product_code     = product.product_code
+                    AND product_conversion.transaction_unit = unit.unit_name
                 WHERE transaction.fk_id_agreement IS NOT NULL
                 GROUP BY transaction.fk_id_distributor, transaction.fk_id_agreement
             """),
@@ -108,13 +107,13 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         _progression_bar(35, "Chargement des paliers…")
 
         # Charge tous les paliers de tous les accords. Chaque accord a 3 lignes :
-        # une par tranche de volume (min_uvc, max_uvc, price). C'est dans cette table
+        # une par tranche de volume (min_volume, max_volume, price). C'est dans cette table
         # qu'on va chercher le prix applicable une fois le palier déterminé
         dataframe_agreement_tiers = pd.read_sql(
             text("""
-                SELECT id_agreement_tier, fk_id_agreement, min_uvc, max_uvc, price
+                SELECT id_agreement_tier, fk_id_agreement, min_volume, max_volume, price
                 FROM agreement_tier
-                ORDER BY fk_id_agreement, min_uvc
+                ORDER BY fk_id_agreement, min_volume
             """),
             connection
         )
@@ -154,14 +153,14 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         how="left"
     )
 
-    # UVC totale par palier_group — global tous distributeurs confondus
+    # Volume total par palier_group — global tous distributeurs confondus
     # C'est ce total qui détermine le palier atteint; il s'applique ensuite
     # à chaque (distributeur x accord) pour calculer son propre revenu
     group_totals = (
         dataframe[dataframe["palier_group"].notna()] # Ignore les accords sans palier_group
-        .groupby("palier_group")["uvc"] # Sommer toutes les UVC du groupe, tous distributeurs confondus
-        .sum() # Sommer les UVC pour chaque groupe
-        .rename("group_uvc") # Renommer la colonne
+        .groupby("palier_group")["volume"] # Sommer tout le volume du groupe, tous distributeurs confondus
+        .sum() # Sommer le volume pour chaque groupe
+        .rename("group_volume") # Renommer la colonne
         .reset_index() # Remettre les colonnes de groupement comme colonnes normales
     )
 
@@ -207,60 +206,60 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         # comme NaN depuis pandas, ce qui provoquerait des erreurs à l'affichage
         agreement_id   = int(row["fk_id_agreement"])
         distributor_id = int(row["fk_id_distributor"])
-        uvc_accord     = int(row["uvc"])
+        volume_accord     = int(row["volume"])
         industrial     = str(row.get("industrial_name") or "N/A")
         brand          = str(row.get("brand_name")      or "N/A")
         category       = str(row.get("category_name")   or "N/A")
         distributor    = str(row.get("distributor_name") or "N/A")
         palier_group   = str(row.get("palier_group")     or "—")
 
-        # group_uvc est le volume total du palier_group (tous accords + tous distributeurs confondus)
+        # group_volume est le volume total du palier_group (tous accords + tous distributeurs confondus)
         # Si l'accord n'a pas de palier_group (ex : produit hors accord comme Lipton),
         # on utilise le volume de l'accord seul comme fallback — il n'atteindra jamais
         # de palier, mais ça évite une erreur et produit un message "Aucun palier applicable"
-        group_uvc_raw = row.get("group_uvc")
-        group_uvc     = int(group_uvc_raw) if pd.notna(group_uvc_raw) else uvc_accord
+        group_volume_raw = row.get("group_volume")
+        group_volume     = int(group_volume_raw) if pd.notna(group_volume_raw) else volume_accord
 
         # Récupère les paliers de cet accord et les trie du plus élevé au plus bas
         tiers = sorted(
             tiers_by_agreement.get(agreement_id, []),
-            key=lambda tier: int(tier["min_uvc"]),
+            key=lambda tier: int(tier["min_volume"]),
             reverse=True
         )
 
         # On teste d'abord le palier le plus haut : dès qu'on trouve un intervalle
-        # [min_uvc, max_uvc] qui contient group_uvc, c'est le palier applicable
+        # [min_volume, max_volume] qui contient group_volume, c'est le palier applicable
         applicable_tier = None
         for tier in tiers:
-            min_uvc = int(tier["min_uvc"])
-            max_uvc = int(tier["max_uvc"]) if pd.notna(tier["max_uvc"]) else None
+            min_volume = int(tier["min_volume"])
+            max_volume = int(tier["max_volume"]) if pd.notna(tier["max_volume"]) else None
 
-            # group_uvc >= min_uvc → la quantité atteint le seuil bas du palier
-            # max_uvc is None      → le palier est ouvert ("40 000 et plus") : pas de borne haute
-            # group_uvc <= max_uvc → la quantité ne dépasse pas la borne haute
-            if group_uvc >= min_uvc and (max_uvc is None or group_uvc <= max_uvc):
+            # group_volume >= min_volume → la quantité atteint le seuil bas du palier
+            # max_volume is None      → le palier est ouvert ("40 000 et plus") : pas de borne haute
+            # group_volume <= max_volume → la quantité ne dépasse pas la borne haute
+            if group_volume >= min_volume and (max_volume is None or group_volume <= max_volume):
                 applicable_tier = tier
                 break
 
         # Palier trouvé → préparation de la mise à jour en base et construction du détail.
         # revenue est calculé uniquement pour alimenter la chaîne detail (affichage).
-        # Chaque distributeur a ses propres UVC, mais tous partagent le même palier
-        # (déterminé par le group_uvc global, tous distributeurs confondus).
+        # Chaque distributeur a son propre volume, mais tous partagent le même palier
+        # (déterminé par le group_volume global, tous distributeurs confondus).
         if applicable_tier is not None:
             tier_id    = int(applicable_tier["id_agreement_tier"])
             tier_price = float(applicable_tier["price"])
-            min_palier   = int(applicable_tier["min_uvc"])
+            min_palier   = int(applicable_tier["min_volume"])
             max_palier   = (
-                f"{int(applicable_tier['max_uvc']):,}"
-                if pd.notna(applicable_tier["max_uvc"])
+                f"{int(applicable_tier["max_volume"]):,}"
+                if pd.notna(applicable_tier["max_volume"])
                 else "+∞"
             )
-            revenue  = uvc_accord * tier_price
-            tier_str = f"{tier_price:.2f} €/UVC"
+            revenue  = volume_accord * tier_price
+            tier_str = f"{tier_price:.2f} €/unité accord"
             detail   = (
-                f"{uvc_accord:,} UVC x {tier_price:.2f} €/UVC "
+                f"{volume_accord:,} unités x {tier_price:.2f} €/UVC "
                 f"= {revenue:,.2f} €  "
-                f"(palier {min_palier:,}-{max_palier} UVC, total groupe {group_uvc:,} UVC)"
+                f"(palier {min_palier:,}-{max_palier} unités, total groupe {group_volume:,}unités)"
             )
 
             # Empile les paramètres nécessaires à l'UPDATE de la table transaction.
@@ -276,7 +275,7 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
             tier_id    = None
             tier_price = 0.0
             tier_str   = "Aucun palier"
-            detail     = f"Aucun palier applicable (total groupe {group_uvc:,} UVC)"
+            detail     = f"Aucun palier applicable (total groupe {group_volume:,}unités)"
 
         # Empile le résultat de cette ligne pour l'affichage dans l'interface.
         # Chaque entrée correspond à un accord pour un distributeur donné.
@@ -287,8 +286,8 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
             "brand":        brand,
             "category":     category,
             "palier_group": palier_group,
-            "total_uvc":    uvc_accord,
-            "group_uvc":    group_uvc,
+            "total_volume":    volume_accord,
+            "group_volume":    group_volume,
             "tier_price":   tier_str,
             "detail":       detail,
         })
@@ -298,21 +297,22 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
 
     if transactions_to_update:
         # Met à jour en base les 3 colonnes agreement_* ayant atteint un palier
-        # agreement_total_price est recalculé directement en SQL
-        # avec la même logique CASE WHEN que l'étape 1 : quantity pour is_billed_per_case = 1,
-        # quantity x units_per_case sinon
+        # agreement_total_price = agreement_unit_price x volume de la transaction
+        # Le facteur de conversion provient de product_conversion
+        # COALESCE(conversion_factor, 1) sécurise le cas où la correspondance est absente
         update_sql = text("""
             UPDATE transaction
-            JOIN product   ON product.id_product     = transaction.fk_id_product
-            JOIN agreement ON agreement.id_agreement = transaction.fk_id_agreement
+            JOIN product ON product.id_product = transaction.fk_id_product
+            JOIN distributor ON distributor.id_distributor = transaction.fk_id_distributor
+            JOIN unit ON unit.id_unit = product.fk_id_unit
+            LEFT JOIN product_conversion
+                ON  product_conversion.distributor_name = distributor.distributor_name
+                AND product_conversion.product_code     = product.product_code
+                AND product_conversion.transaction_unit = unit.unit_name
             SET transaction.fk_id_agreement_tier  = :fk_id_agreement_tier,
                 transaction.agreement_unit_price  = :agreement_unit_price,
                 transaction.agreement_total_price = ROUND(
-                    :agreement_unit_price *
-                    CASE
-                        WHEN agreement.is_billed_per_case = 1 THEN transaction.quantity
-                        ELSE transaction.quantity * product.units_per_case
-                    END,
+                    :agreement_unit_price * transaction.quantity * COALESCE(product_conversion.conversion_factor, 1),
                     2
                 )
             WHERE transaction.fk_id_agreement = :fk_id_agreement
