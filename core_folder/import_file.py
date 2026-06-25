@@ -60,9 +60,6 @@ DESCRIPTION_BRAND_KEYWORDS = [
 
 VOLUME_CATEGORY_BRANDS = {"TABASCO", "MAIZENA"}
 
-# Détecte le nombre d'unités par colis depuis la description (ex : "125G*40" → 40, "12x250ml" → 12)
-UPC_PATTERN = re.compile(r'\d+[A-Za-z]+[xX*](\d+)|\d+[xX*](\d+)|(?<![A-Za-z\d])[xX](\d+)')
-
 # -----
 
 def normalize_string_method(param_text: str) -> str:
@@ -188,19 +185,15 @@ def import_transactions(
     """
     Import d'un fichier Excel de transactions.
 
-    Accepte deux formats :
-    - Format brut  : colonnes françaises (product_detail_export.xlsx)
-    - Format final : colonnes anglaises avec product_name déjà renseigné
+    Format accepté :
+        - Format brut  : modèle fichier product_detail_export.xlsx
 
-    En format brut, la pipeline complète est exécutée :
+    La pipeline complète est exécutée :
     normalisation des colonnes et des unités, détection des marques, keyword matching
-    pour résoudre product_name et catégorie, puis insertion des nouveaux produits.
+    pour résoudre product_name et catégorie, puis insertion des nouveaux produits
 
-    param_transaction_date : date à associer à toutes les transactions importées. Par défaut : date du jour de l'import.
-    param_mapping_path : chemin absolu vers mapping_product.xlsx, fourni par l'interface.
-        -> Obligatoire pour le format brut. Ignoré pour le format final.
-
-    Retourne un résumé : transactions insérées, FK manquantes, date utilisée.
+    param_transaction_date : date à associer à toutes les transactions importées. Par défaut : date du jour de l'import
+    param_mapping_path : récupérer le fichier mapping_product.xlsx -> Obligatoire
     """
 
     transaction_date = param_transaction_date or date.today()
@@ -229,10 +222,11 @@ def import_transactions(
         lambda row: row.astype(str).str.contains("Filtres appliqués", case=False, na=False).any(),
         axis=1
     )
+
     if filter_mask.any():
         dataframe = dataframe[~filter_mask].reset_index(drop=True)
 
-    # Auto-détection du format : renommage des colonnes françaises si format brut
+    # Auto-détection du format : renommage des colonnes
     is_raw_format = "DISTRIBUTEUR" in dataframe.columns
     if is_raw_format:
         dataframe = dataframe.rename(columns=RAW_COLUMN_MAP)
@@ -440,12 +434,6 @@ def import_transactions(
             if not all([id_brand, id_category, id_unit, id_datasource]):
                 continue
 
-            units_per_case = 1
-            if description:
-                units_per_case_match = UPC_PATTERN.search(description)
-                if units_per_case_match:
-                    units_per_case = int(units_per_case_match.group(1) or units_per_case_match.group(2) or units_per_case_match.group(3))
-
             new_products.append({
                 "fk_id_brand":       id_brand,
                 "fk_id_category":    id_category,
@@ -454,7 +442,6 @@ def import_transactions(
                 "product_name":      product_name,
                 "product_code":      product_code or None,
                 "description":       description  or None,
-                "units_per_case":    units_per_case,
             })
             seen_keys.add(key)
 
@@ -465,10 +452,10 @@ def import_transactions(
                         text("""
                             INSERT INTO product
                                 (fk_id_brand, fk_id_category, fk_id_unit, fk_id_data_source,
-                                product_name, product_code, description, units_per_case)
+                                product_name, product_code, description)
                             VALUES
                                 (:fk_id_brand, :fk_id_category, :fk_id_unit, :fk_id_data_source,
-                                :product_name, :product_code, :description, :units_per_case)
+                                :product_name, :product_code, :description)
                         """),
                         value
                     )
@@ -642,12 +629,94 @@ def import_transactions(
 
 # -----
 
+def import_conversions(param_file_path: str, param_progress_callback=None) -> dict:
+    """
+    Import du fichier de correspondance (table_correspondance.xlsx)
+
+    Lit le fichier Excel renseigné par le client et insert ou met à jour la table
+    product_conversion avec les facteurs de conversion et les unités accord
+
+    Colonnes attendues dans le fichier :
+    - Distributeur
+    - Code produit
+    - Unité transaction (UF)
+    - Unité accord
+    - Facteur de conversion
+    """
+
+    # -----
+
+    def _progression_bar(param_percentage: int, param_message: str) -> None:
+        if param_progress_callback:
+            param_progress_callback(param_percentage, param_message)
+
+    # -----
+
+    _progression_bar(0, "Lecture du fichier de correspondance…")
+
+    dataframe = pd.read_excel(param_file_path)
+
+    # Vérification des colonnes minimales requises
+    required = {"Distributeur", "Code produit", "Unité transaction (UF)", "Unité accord", "Facteur de conversion"}
+    missing  = required - set(dataframe.columns)
+    if missing:
+        raise ValueError(f"Colonnes manquantes dans le fichier : {missing}")
+
+    # Supprimer les lignes avec des valeurs manquantes et renommer les colonnes
+    dataframe = dataframe.dropna(subset=["Distributeur", "Code produit", "Unité transaction (UF)", "Unité accord", "Facteur de conversion"])
+    dataframe = dataframe.rename(columns={
+        "Distributeur":           "distributor_name",
+        "Code produit":           "product_code",
+        "Unité transaction (UF)": "transaction_unit",
+        "Unité accord":           "agreement_unit",
+        "Facteur de conversion":  "conversion_factor",
+    })
+
+    total = len(dataframe)
+    _progression_bar(20, f"{total} lignes à traiter…")
+
+    # ON DUPLICATE KEY UPDATE écrase agreement_unit et conversion_factor avec les valeurs du fichier
+    upsert_sql = text("""
+        INSERT INTO product_conversion
+            (distributor_name, product_code, transaction_unit, agreement_unit, conversion_factor)
+        VALUES
+            (:distributor_name, :product_code, :transaction_unit, :agreement_unit, :conversion_factor)
+        ON DUPLICATE KEY UPDATE
+            agreement_unit    = VALUES(agreement_unit),
+            conversion_factor = VALUES(conversion_factor)
+    """)
+
+    processed = 0
+    with get_connection() as connection:
+        for index, (_, row) in enumerate(dataframe.iterrows()):
+            connection.execute(upsert_sql, {
+                "distributor_name": str(row["distributor_name"]),
+                "product_code":     str(row["product_code"]),
+                "transaction_unit": str(row["transaction_unit"]),
+                "agreement_unit":   str(row["agreement_unit"]),
+                "conversion_factor": float(row["conversion_factor"]),
+            })
+            processed += 1
+            if index % 50 == 0:
+                _progression_bar(20 + int(75 * index / max(total, 1)), f"Traitement {index + 1}/{total}…")
+
+        connection.commit()
+
+    _progression_bar(100, f"{processed} correspondances importées.")
+
+    return {
+        "processed": processed,
+        "total":     total,
+    }
+
+# -----
+
 def import_agreements(param_file_path: str, param_progress_callback=None) -> dict:
     """
-    Import d'un fichier Excel de mapping (format mapping_product.xlsx).
+    Import d'un fichier Excel de mapping (format mapping_product.xlsx)
 
     Stratégie historique — aucune suppression :
-    - Accord identique (palier_group + is_billed_per_case + prix inchangés)
+    - Accord identique (palier_group + prix inchangés)
         → prolongation de end_date (même id_agreement)
     - Accord modifié (l'un des éléments ci-dessus a changé)
         → fermeture de l'ancien + création du nouveau
@@ -656,7 +725,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     - Accord absent du nouveau fichier
         → fermeture (end_date = 31/12 année précédente)
 
-    Les dates sont cadrées sur l'année civile courante (01/01 → 31/12).
+    Les dates sont cadrées sur l'année civile courante (01/01 → 31/12)
     """
 
     # -----
@@ -678,7 +747,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     sheet      = "mapping_products" if "mapping_products" in excel_file.sheet_names else excel_file.sheet_names[0]
     mapping    = pd.read_excel(param_file_path, sheet_name=sheet)
 
-    required = {"brand", "categories", "is_billed_per_case"}
+    required = {"brand", "categories"}
     missing  = required - set(mapping.columns)
     if missing:
         raise ValueError(f"Colonnes manquantes dans le fichier mapping : {missing}")
@@ -692,6 +761,8 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     if not palier_columns:
         raise ValueError("Aucune colonne palier_* trouvée dans le fichier.")
 
+    # -----
+
     def _detect_palier_group(param_row):
         """ Détecte le palier_group depuis les colonnes palier_* (ex : 'knorr', 'dressing+maizena+TVB') """
 
@@ -702,6 +773,8 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                     return parsed[0]
 
         return None
+
+    # -----
 
     mapping["palier_group"] = mapping.apply(_detect_palier_group, axis=1)
 
@@ -730,7 +803,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
     with get_connection() as connection:
         database_agreement = pd.read_sql(
-            text("SELECT id_agreement, fk_id_brand, fk_id_category, palier_group, is_billed_per_case, end_date FROM agreement"),
+            text("SELECT id_agreement, fk_id_brand, fk_id_category, palier_group, end_date FROM agreement"),
             connection
         )
 
@@ -795,7 +868,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # ── Étape 4 : Construction de la liste de travail ────────────────────
 
     # copy() pour éviter le SettingWithCopyWarning lors de l'itération sur mapping_work
-    mapping_work = mapping[["brand", "categories", "palier_group", "is_billed_per_case"]].drop_duplicates(subset=["brand", "categories"]).copy()
+    mapping_work = mapping[["brand", "categories", "palier_group"]].drop_duplicates(subset=["brand", "categories"]).copy()
     mapping_work = mapping_work.merge(
         database_brand.rename(columns={"brand_name": "brand"}), on="brand", how="left"
     )
@@ -826,7 +899,6 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         id_brand_int    = int(work_row["id_brand"])
         id_category_int = int(work_row["id_category"])
         palier_group    = work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None
-        billed_per_case = int(work_row.get("is_billed_per_case", 0))
         new_keys.add((id_brand_int, id_category_int))
 
         existing = most_recent_by_key.get((id_brand_int, id_category_int))
@@ -837,7 +909,6 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         else:
             existing_id = int(existing["id_agreement"])
             existing_palier_group = existing.get("palier_group") if pd.notna(existing.get("palier_group")) else None
-            existing_billed = int(existing.get("is_billed_per_case", 0))
 
             structure_database = _database_tier_structure(param_id_agreement=existing_id)
             structure_excel = _excel_tier_structure(
@@ -848,7 +919,6 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
             accord_unchanged = (
                 existing_palier_group == palier_group
-                and existing_billed == billed_per_case
                 and structure_database == structure_excel
             )
 
@@ -889,10 +959,10 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     insert_agreement_sql = text("""
         INSERT INTO agreement
             (fk_id_brand, fk_id_category, fk_id_industrial, fk_id_unit,
-            palier_group, is_billed_per_case, start_date, end_date)
+            palier_group, start_date, end_date)
         VALUES
             (:fk_id_brand, :fk_id_category, :fk_id_industrial, :fk_id_unit,
-            :palier_group, :is_billed_per_case, :start_date, :end_date)
+            :palier_group, :start_date, :end_date)
     """)
 
     new_agreement_rows: list = []
@@ -906,7 +976,6 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                     "fk_id_industrial": id_industrial,
                     "fk_id_unit":       id_unit_uvc,
                     "palier_group":     work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None,
-                    "is_billed_per_case": int(work_row.get("is_billed_per_case", 0)),
                     "start_date":       start_date_new,
                     "end_date":         end_date_new,
                 },
