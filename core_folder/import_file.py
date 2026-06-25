@@ -557,8 +557,23 @@ def import_transactions(
     # ── Étape 5 : Insertion des transactions ─────────────────────────────────
     _progression_bar(55, "Insertion des transactions…")
 
+    # Vérifie l'existence avant d'insérer pour éviter les doublons si le script
+    # est relancé sur le même fichier. La clé d'unicité est :
+    # (fk_id_product, fk_id_distributor, quantity, total_price)
+    select_transaction_sql = text("""
+        SELECT
+            id_transaction
+        FROM transaction
+        WHERE
+            fk_id_product         = :fk_id_product
+            AND fk_id_distributor = :fk_id_distributor
+            AND quantity          = :quantity
+            AND total_price       = :total_price
+        LIMIT 1
+    """)
+
     insert_transaction_sql = text("""
-        INSERT INTO `transaction`
+        INSERT INTO transaction
             (fk_id_product, fk_id_agreement, fk_id_distributor,
             quantity, unit_price, total_price, transaction_date)
         VALUES
@@ -567,6 +582,7 @@ def import_transactions(
     """)
 
     inserted      = 0
+    skipped       = 0
     null_fk_count = 0
     total         = len(dataframe)
 
@@ -575,15 +591,35 @@ def import_transactions(
             if (pd.isna(row.get("id_product")) or pd.isna(row.get("id_agreement")) or pd.isna(row.get("id_distributor"))):
                 null_fk_count += 1
 
+            # Paramètres partagés entre le SELECT et l'INSERT
+            fk_id_product     = int(row["id_product"])     if pd.notna(row.get("id_product"))     else None
+            fk_id_distributor = int(row["id_distributor"]) if pd.notna(row.get("id_distributor")) else None
+            quantity          = int(row["quantity"])
+            total_price       = float(row["amount_ht"])
+
+            # Vérifie si la transaction existe déjà en base avant d'insérer
+            existing = None
+            if fk_id_product and fk_id_distributor:
+                existing = connection.execute(select_transaction_sql, {
+                    "fk_id_product":     fk_id_product,
+                    "fk_id_distributor": fk_id_distributor,
+                    "quantity":          quantity,
+                    "total_price":       total_price,
+                }).fetchone()
+
+            if existing:
+                skipped += 1
+                continue
+
             connection.execute(
                 insert_transaction_sql,
                 {
-                    "fk_id_product":     int(row["id_product"])     if pd.notna(row.get("id_product"))     else None,
+                    "fk_id_product":     fk_id_product,
                     "fk_id_agreement":   int(row["id_agreement"])   if pd.notna(row.get("id_agreement"))   else None,
-                    "fk_id_distributor": int(row["id_distributor"]) if pd.notna(row.get("id_distributor")) else None,
-                    "quantity":          int(row["quantity"]),
+                    "fk_id_distributor": fk_id_distributor,
+                    "quantity":          quantity,
                     "unit_price":        float(row["unit_price"])   if pd.notna(row.get("unit_price"))     else 0.0,
-                    "total_price":       float(row["amount_ht"]),
+                    "total_price":       total_price,
                     "transaction_date":  transaction_date,
                 },
             )
@@ -594,10 +630,11 @@ def import_transactions(
 
         connection.commit()
 
-    _progression_bar(100, f"{inserted} transactions insérées ({null_fk_count} avec FK manquants).")
+    _progression_bar(100, f"{inserted} transactions insérées, {skipped} ignorées (doublons), {null_fk_count} avec FK manquants.")
 
     return {
         "inserted": inserted,
+        "skipped":  skipped,
         "null_fk": null_fk_count,
         "total": total,
         "transaction_date_used": transaction_date.isoformat()
