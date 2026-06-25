@@ -26,7 +26,7 @@ def export_calculation_method(param_file_path: str, param_results: list, param_s
         "Fournisseur":      result["industrial"],
         "Marque":           result["brand"],
         "Catégorie":        result["category"],
-        "Total UVC":        result["total_uvc"],
+        "Total volume":     result["total_volume"],
         "Taux accord":      result["tier_price"],
         "Détail du calcul": result["detail"]
     } for result in param_results])

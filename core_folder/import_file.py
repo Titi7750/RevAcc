@@ -159,7 +159,7 @@ def find_product_name_method(param_row: pd.Series, param_mapping: pd.DataFrame) 
 
 def parse_palier_column_name_method(param_column_name: str):
     """
-    Retourne (group_key, min_uvc, max_uvc_inclusive) ou None.
+    Retourne (group_key, min_volume, max_volume_inclusive) ou None.
     - palier_X_25000-35000_uvc    → ('X', 25000, 34999)
     - palier_X_superior-40000_uvc → ('X', 40000, None)
     """
@@ -808,7 +808,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         )
 
         database_agreement_tiers = pd.read_sql(
-            text("SELECT fk_id_agreement, min_uvc, max_uvc, price FROM agreement_tier"),
+            text("SELECT fk_id_agreement, min_volume, max_volume, price FROM agreement_tier"),
             connection
         )
 
@@ -828,19 +828,19 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     # -----
 
     def _database_tier_structure(param_id_agreement: int) -> dict:
-        """ Retourne {(min_uvc, max_uvc): price} pour un accord existant en base """
+        """ Retourne {(min_volume, max_volume): price} pour un accord existant en base """
 
         agreement_tiers = database_agreement_tiers[database_agreement_tiers["fk_id_agreement"] == param_id_agreement]
 
         return {
-            (int(row["min_uvc"]), int(row["max_uvc"]) if pd.notna(row["max_uvc"]) else None): round(float(row["price"]), 2)
+            (int(row["min_volume"]), int(row["max_volume"]) if pd.notna(row["max_volume"]) else None): round(float(row["price"]), 2)
             for _, row in agreement_tiers.iterrows()
         }
 
     # -----
 
     def _excel_tier_structure(param_brand_name: str, param_category_name: str, param_palier_group: str) -> dict:
-        """ Retourne {(min_uvc, max_uvc): price} depuis les colonnes palier du fichier Excel """
+        """ Retourne {(min_volume, max_volume): price} depuis les colonnes palier du fichier Excel """
 
         reference_rows = mapping[(mapping["brand"] == param_brand_name) & (mapping["categories"] == param_category_name)]
         if reference_rows.empty:
@@ -853,13 +853,13 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
             if not parsed:
                 continue
 
-            group, min_uvc, max_uvc = parsed
+            group, min_volume, max_volume = parsed
             if group != param_palier_group:
                 continue
 
             price = reference_row.get(column)
             if pd.notna(price):
-                result[(min_uvc, max_uvc)] = round(float(price), 2)
+                result[(min_volume, max_volume)] = round(float(price), 2)
 
         return result
 
@@ -988,8 +988,8 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     _progression_bar(80, "Insertion des paliers…")
 
     insert_tier_sql = text("""
-        INSERT INTO agreement_tier (fk_id_agreement, min_uvc, max_uvc, price)
-        VALUES (:fk_id_agreement, :min_uvc, :max_uvc, :price)
+        INSERT INTO agreement_tier (fk_id_agreement, min_volume, max_volume, price)
+        VALUES (:fk_id_agreement, :min_volume, :max_volume, :price)
     """)
 
     tier_count = 0
@@ -1010,7 +1010,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                 if not parsed:
                     continue
 
-                group, min_uvc, max_uvc = parsed
+                group, min_volume, max_volume = parsed
                 if group != palier_group:
                     continue
 
@@ -1022,8 +1022,8 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                     insert_tier_sql,
                     {
                         "fk_id_agreement": new_id_agreement,
-                        "min_uvc":         min_uvc,
-                        "max_uvc":         max_uvc,
+                        "min_volume":         min_volume,
+                        "max_volume":         max_volume,
                         "price":           float(price),
                     },
                 )

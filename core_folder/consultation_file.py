@@ -66,17 +66,18 @@ def load_consultation_agreements_method() -> list:
                     END AS periode,
                     GROUP_CONCAT(
                         CONCAT(
-                            agreement_tier.min_uvc, ' - ',
-                            COALESCE(agreement_tier.max_uvc, '+∞'), ' UVC : ',
-                            agreement_tier.price, ' €/UVC'
+                            agreement_tier.min_volume, ' - ',
+                            COALESCE(agreement_tier.max_volume, '+∞'), ' ', unit.unit_name, ' : ',
+                            agreement_tier.price, ' €/', unit.unit_name
                         )
-                        ORDER BY agreement_tier.min_uvc SEPARATOR ' | '
+                        ORDER BY agreement_tier.min_volume SEPARATOR ' | '
                     ) AS taux,
                     'Actif' AS status
                 FROM agreement
                 JOIN industrial          ON industrial.id_industrial       = agreement.fk_id_industrial
                 JOIN brand               ON brand.id_brand                 = agreement.fk_id_brand
                 JOIN category            ON category.id_category           = agreement.fk_id_category
+                JOIN unit                ON unit.id_unit                   = agreement.fk_id_unit
                 LEFT JOIN agreement_tier ON agreement_tier.fk_id_agreement = agreement.id_agreement
                 GROUP BY agreement.id_agreement
                 ORDER BY industrial.industrial_name, brand.brand_name

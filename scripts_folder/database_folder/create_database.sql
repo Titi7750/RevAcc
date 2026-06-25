@@ -143,8 +143,8 @@ DROP TABLE IF EXISTS `agreement_tier`;
 CREATE TABLE `agreement_tier` (
     `id_agreement_tier` INT NOT NULL AUTO_INCREMENT,
     `fk_id_agreement`   INT NOT NULL,
-    `min_uvc`           INT NOT NULL,
-    `max_uvc`           INT DEFAULT NULL,
+    `min_volume`        INT NOT NULL,
+    `max_volume`        INT DEFAULT NULL,
     `price`             DECIMAL(10, 2) NOT NULL,
     PRIMARY KEY (`id_agreement_tier`),
     FOREIGN KEY (`fk_id_agreement`)
