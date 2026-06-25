@@ -64,11 +64,13 @@ class GuiImportPageClass(QWidget):
 
         self.button_import_transactions = QPushButton("Importer transactions")
         self.button_import_accords      = QPushButton("Importer accords")
+        self.button_import_correspondances = QPushButton("Importer correspondances")
         self.button_export_template     = QPushButton("Exporter modèle accords")
         self.button_export_template.setObjectName("primaryButton")
 
         buttons_layout.addWidget(self.button_import_transactions)
         buttons_layout.addWidget(self.button_import_accords)
+        buttons_layout.addWidget(self.button_import_correspondances)
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.button_export_template)
 

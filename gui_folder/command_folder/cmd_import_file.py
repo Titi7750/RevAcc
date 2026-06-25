@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 # Import personal functions
 from gui_folder.graphic_folder.gui_import_file import GuiImportPageClass
 # -----
-from core_folder.import_file import import_transactions, import_agreements
+from core_folder.import_file import import_transactions, import_agreements, import_conversions
 
 # Custom variable type construction
 ## None
@@ -59,6 +59,8 @@ class ImportWorker(QThread):
             # Choix de la fonction selon le type d'import
             if self.file_type == "transactions":
                 import_result = import_transactions(self.file_path, self.progress.emit, param_mapping_path=self.mapping_path)
+            elif self.file_type == "conversions":
+                import_result = import_conversions(self.file_path, self.progress.emit)
             else:
                 import_result = import_agreements(self.file_path, self.progress.emit)
 
@@ -103,6 +105,9 @@ class CmdImportPageClass(GuiImportPageClass):
         )
         self.button_import_accords.clicked.connect(
             lambda: self.start_import_method("accords")
+        )
+        self.button_import_correspondances.clicked.connect(
+            lambda: self.start_import_method("conversions")
         )
         self.button_export_template.clicked.connect(self.export_template_method)
 
@@ -169,6 +174,7 @@ class CmdImportPageClass(GuiImportPageClass):
         # Désactivation des boutons pendant l'import pour éviter un double import
         self.button_import_transactions.setEnabled(False)
         self.button_import_accords.setEnabled(False)
+        self.button_import_correspondances.setEnabled(False)
 
         # Démarrage du thread d'import
         self._import_worker = ImportWorker(param_file_type=param_file_type, param_file_path=file_path, param_mapping_path=mapping_path)
@@ -201,6 +207,7 @@ class CmdImportPageClass(GuiImportPageClass):
 
         self.button_import_transactions.setEnabled(True)
         self.button_import_accords.setEnabled(True)
+        self.button_import_correspondances.setEnabled(True)
 
         # Construction du message de résultat selon le type d'import
         if "inserted" in param_result:
@@ -208,6 +215,8 @@ class CmdImportPageClass(GuiImportPageClass):
                 f"{param_result['inserted']} transactions insérées"
                 + (f" ({param_result['null_fk']} avec FK manquants)" if param_result["null_fk"] else "")
             )
+        elif "processed" in param_result:
+            result_detail = f"{param_result['processed']} correspondances importées"
         else:
             result_detail = (
                 f"{param_result['agreements']} accords créés, "
@@ -238,6 +247,7 @@ class CmdImportPageClass(GuiImportPageClass):
 
         self.button_import_transactions.setEnabled(True)
         self.button_import_accords.setEnabled(True)
+        self.button_import_correspondances.setEnabled(True)
 
         if self._current_import_row >= 0:
             self.table_imports.setItem(self._current_import_row, 2, QTableWidgetItem("Erreur"))

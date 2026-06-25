@@ -71,7 +71,6 @@ CREATE TABLE `product` (
     `product_code`   VARCHAR(255) NULL,
     `description`    TEXT NULL,
     `product_date`   DATE NULL,
-    `units_per_case` INT NOT NULL DEFAULT 1,
     PRIMARY KEY (`id_product`),
     FOREIGN KEY (`fk_id_brand`)
         REFERENCES `brand`(`id_brand`)
@@ -88,6 +87,25 @@ CREATE TABLE `product` (
 ) ENGINE=InnoDB;
 
 -- ------------------------------------------------------------
+-- Product Conversion
+-- Table de correspondance entre l'unité de transaction (UF)
+-- et l'unité de l'accord, par distributeur et code produit
+-- Le facteur de conversion est renseigné manuellement par le client
+-- Valeur par défaut : 1 (à corriger par le client)
+-- ------------------------------------------------------------
+
+DROP TABLE IF EXISTS `product_conversion`;
+CREATE TABLE `product_conversion` (
+    `id_conversion`      INT NOT NULL AUTO_INCREMENT,
+    `distributor_name`   VARCHAR(255) NOT NULL,
+    `product_code`       VARCHAR(255) NOT NULL,
+    `transaction_unit`   VARCHAR(50)  NOT NULL,
+    `conversion_factor`  DECIMAL(10, 4) NOT NULL DEFAULT 1,
+    PRIMARY KEY (`id_conversion`),
+    UNIQUE KEY `uq_conversion` (`distributor_name`, `product_code`, `transaction_unit`)
+) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------
 -- Agreement
 -- ------------------------------------------------------------
 
@@ -99,7 +117,6 @@ CREATE TABLE `agreement` (
     `fk_id_industrial`   INT NOT NULL,
     `fk_id_unit`         INT NOT NULL,
     `palier_group`       VARCHAR(255) NULL,
-    `is_billed_per_case` TINYINT(1) NOT NULL DEFAULT 0,
     `start_date`         DATE NULL,
     `end_date`           DATE NULL,
     PRIMARY KEY (`id_agreement`),
