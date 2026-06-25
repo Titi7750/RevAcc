@@ -100,6 +100,7 @@ CREATE TABLE `product_conversion` (
     `distributor_name`   VARCHAR(255) NOT NULL,
     `product_code`       VARCHAR(255) NOT NULL,
     `transaction_unit`   VARCHAR(50)  NOT NULL,
+    `agreement_unit`     VARCHAR(50)  NOT NULL DEFAULT 'UVC',
     `conversion_factor`  DECIMAL(10, 4) NOT NULL DEFAULT 1,
     PRIMARY KEY (`id_conversion`),
     UNIQUE KEY `uq_conversion` (`distributor_name`, `product_code`, `transaction_unit`)
