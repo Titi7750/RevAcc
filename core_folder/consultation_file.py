@@ -78,7 +78,7 @@ def load_consultation_agreements_method() -> list:
                 JOIN brand               ON brand.id_brand                 = agreement.fk_id_brand
                 JOIN category            ON category.id_category           = agreement.fk_id_category
                 LEFT JOIN agreement_tier ON agreement_tier.fk_id_agreement = agreement.id_agreement
-                GROUP BY agreement.id_agreement, industrial.industrial_name, brand.brand_name, category.category_name, agreement.start_date, agreement.end_date
+                GROUP BY agreement.id_agreement
                 ORDER BY industrial.industrial_name, brand.brand_name
                 """
             )
