@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble
 
-Ce modèle de données gère les **accords de reversement** négociés entre industriels et **Entegra**, par marque et catégorie, avec un système de paliers basés sur les volumes UVC (Unités de Vente Consommateur).
+Ce modèle de données gère les **accords de reversement** négociés entre industriels et **Entegra**, par marque et catégorie, avec un système de paliers basés sur les volumes (UVC, colis, KG, etc. selon l'accord).
 
 ### Chaîne commerciale
 
@@ -26,6 +26,8 @@ industrial ───────────────────────
 product ─────────────────────────────┬──▶ transaction ◀─────┘
 agreement ───────────────────────────┤
 distributor ─────────────────────────┘
+
+product_conversion
 ```
 
 ---
@@ -120,14 +122,27 @@ Produits commercialisés, rattachés à une marque, une catégorie et une source
 | `product_code` | VARCHAR(255) | NULL | Code du produit |
 | `description` | TEXT | NULL | Description libre |
 | `product_date` | DATE | NULL | Date associée au produit |
-| `units_per_case` | INT | NOT NULL, DEFAULT 1 | Nombre d'UVC par colis — extrait de la description à l'import; utilisé pour la conversion colis → UVC lors du calcul du revenu |
+
+---
+
+### `product_conversion`
+Table de correspondance entre l'unité de transaction (UF) et l'unité de l'accord, par distributeur et code produit. Renseignée manuellement par le client à partir du fichier `table_correspondance.xlsx`.
+
+> **Choix de conception** : le facteur de conversion absorbe toute la logique de conversion quelle que soit l'unité de l'accord (UVC, colis, KG, etc.). `product_name` n'est pas stocké ici — `product_code` suffit à faire le lien avec la table `product`. La clé d'unicité porte sur `(distributor_name, product_code, transaction_unit)` : un même produit peut avoir des conditionnements différents selon le distributeur.
+
+| Colonne | Type | Contrainte | Description |
+|---|---|---|---|
+| `id_conversion` | INT | PK, AUTO_INCREMENT | Identifiant unique |
+| `distributor_name` | VARCHAR(255) | NOT NULL | Nom du distributeur |
+| `product_code` | VARCHAR(255) | NOT NULL | Code du produit |
+| `transaction_unit` | VARCHAR(50) | NOT NULL | Unité de transaction (UF) — ex : UNITÉ, SEAU, KG |
+| `agreement_unit` | VARCHAR(50) | NOT NULL, DEFAULT 'UVC' | Unité dans laquelle l'accord est exprimé — ex : UVC, Colis, KG |
+| `conversion_factor` | DECIMAL(10,4) | NOT NULL, DEFAULT 1 | Nombre d'unités accord par unité de transaction — ex : 1 colis = 40 UVC → facteur = 40 |
 
 ---
 
 ### `agreement`
-Accord de reversement entre un industriel et **Entegra**, pour une marque et une catégorie données sur une période définie.
-
-> **Choix de conception** : Entegra étant toujours le signataire, elle n'est pas stockée comme FK — ce serait une valeur constante sans intérêt analytique. Un accord est la table de jonction implicite entre `brand`, `category` et `industrial`. Le champ `palier_group` permet de regrouper plusieurs accords (marques/catégories différentes) sous un même compteur de volume pour le calcul du palier — par exemple, tous les accords Knorr partagent le même `palier_group` et leurs UVC sont additionnées pour déterminer le palier commun.
+> **Choix de conception** : Entegra étant toujours le signataire, elle n'est pas stockée comme FK — ce serait une valeur constante sans intérêt analytique. Un accord est la table de jonction implicite entre `brand`, `category` et `industrial`. Le champ `palier_group` permet de regrouper plusieurs accords (marques/catégories différentes) sous un même compteur de volume pour le calcul du palier — par exemple, tous les accords Knorr partagent le même `palier_group` et leurs volumes sont additionnés pour déterminer le palier commun.
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -135,22 +150,21 @@ Accord de reversement entre un industriel et **Entegra**, pour une marque et une
 | `fk_id_brand` | INT | FK → `brand`, NOT NULL | Marque concernée |
 | `fk_id_category` | INT | FK → `category`, NOT NULL | Catégorie concernée |
 | `fk_id_industrial` | INT | FK → `industrial`, NOT NULL | Industriel signataire |
-| `fk_id_unit` | INT | FK → `unit`, NOT NULL | Unité de vente pour les paliers |
+| `fk_id_unit` | INT | FK → `unit`, NOT NULL | Unité dans laquelle les paliers sont exprimés |
 | `palier_group` | VARCHAR(255) | NULL | Groupe de palier partagé entre plusieurs accords (ex : `knorr`, `dressing+maizena+tvb`) |
-| `is_billed_per_case` | TINYINT(1) | NOT NULL, DEFAULT 0 | `1` si le palier est exprimé en colis et non en UVC (ex : Amora - Dosette) |
 | `start_date` | DATE | NULL | Date de début de l'accord |
 | `end_date` | DATE | NULL | Date de fin de l'accord |
 
 ---
 
 ### `agreement_tier`
-Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume UVC et le prix de reversement associé.
+Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume et le prix de reversement associé. Le volume est exprimé dans l'unité définie par `agreement.fk_id_unit`.
 
-> **Choix de conception** : Les paliers sont dans une table dédiée plutôt qu'en colonnes fixes (`min_price`, `mid_price`, `max_price`) afin de supporter un nombre variable de paliers par accord. Le dernier palier d'un accord a `max_uvc = NULL` (pas de plafond).
+> **Choix de conception** : Les paliers sont dans une table dédiée plutôt qu'en colonnes fixes afin de supporter un nombre variable de paliers par accord. Le dernier palier d'un accord a `max_volume = NULL` (pas de plafond).
 
-**Exemple** pour un accord Amora / Sauces Salades 5L :
+**Exemple** pour un accord Amora / Sauces Salades 5L (unité : UVC) :
 
-| `min_uvc` | `max_uvc` | `price` |
+| `min_volume` | `max_volume` | `price` |
 |---|---|---|
 | 25 000 | 35 000 | 1,20 € |
 | 35 000 | 40 000 | 1,30 € |
@@ -160,8 +174,8 @@ Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume 
 |---|---|---|---|
 | `id_agreement_tier` | INT | PK, AUTO_INCREMENT | Identifiant unique |
 | `fk_id_agreement` | INT | FK → `agreement`, NOT NULL | Accord parent |
-| `min_uvc` | INT | NOT NULL | Borne inférieure du palier (incluse) |
-| `max_uvc` | INT | NULL | Borne supérieure du palier (NULL = pas de plafond) |
+| `min_volume` | INT | NOT NULL | Borne inférieure du palier (incluse) |
+| `max_volume` | INT | NULL | Borne supérieure du palier (NULL = pas de plafond) |
 | `price` | DECIMAL(10,2) | NOT NULL | Prix de reversement pour ce palier (€) |
 
 ---
@@ -185,9 +199,9 @@ Vente effective d'un produit, dans le cadre d'un accord commercial.
 | `fk_id_distributor` | INT | FK → `distributor`, NULL | Distributeur |
 | `quantity` | INT | NOT NULL | Quantité vendue en colis |
 | `unit_price` | DECIMAL(10,2) | NOT NULL | Prix unitaire au moment de la vente |
-| `agreement_unit_price` | DECIMAL(10,2) | NULL | Prix du palier de reversement (€/UVC) — renseigné par le calcul |
+| `agreement_unit_price` | DECIMAL(10,2) | NULL | Prix du palier de reversement (€/unité accord) — renseigné par le calcul |
 | `total_price` | DECIMAL(10,2) | NOT NULL | Montant total de vente |
-| `agreement_total_price` | DECIMAL(10,2) | NULL | Revenu de reversement = UVC × agreement_unit_price — renseigné par le calcul |
+| `agreement_total_price` | DECIMAL(10,2) | NULL | Revenu de reversement = volume × agreement_unit_price — renseigné par le calcul |
 | `transaction_date` | DATE | NULL | Date de la transaction |
 
 ---
