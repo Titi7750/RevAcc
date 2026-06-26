@@ -669,6 +669,10 @@ def import_conversions(param_file_path: str, param_progress_callback=None) -> di
     total = len(dataframe)
     _progression_bar(20, f"{total} lignes à traiter…")
 
+    with get_connection() as connection:
+        connection.execute(text("DELETE FROM product_conversion"))
+        connection.commit()
+
     # ON DUPLICATE KEY UPDATE écrase agreement_unit et conversion_factor avec les valeurs du fichier
     upsert_sql = text("""
         INSERT INTO product_conversion
