@@ -38,7 +38,7 @@ product_conversion
 |---|---|
 | Clés primaires | `id_<table>` |
 | Clés étrangères | `fk_id_<table_cible>` |
-| Suppressions | `ON DELETE CASCADE` sur toutes les FK |
+| Suppressions | `ON DELETE CASCADE` sur toutes les FK sauf `fk_id_agreement` dans `transaction` (`ON DELETE SET NULL`) |
 | Encodage | `utf8mb4` / `utf8mb4_general_ci` |
 | Moteur | `InnoDB` (support des FK et transactions ACID) |
 
@@ -142,7 +142,9 @@ Table de correspondance entre l'unité de transaction (UF) et l'unité de l'acco
 ---
 
 ### `agreement`
-> **Choix de conception** : Entegra étant toujours le signataire, elle n'est pas stockée comme FK — ce serait une valeur constante sans intérêt analytique. Un accord est la table de jonction implicite entre `brand`, `category` et `industrial`. Le champ `palier_group` permet de regrouper plusieurs accords (marques/catégories différentes) sous un même compteur de volume pour le calcul du palier — par exemple, tous les accords Knorr partagent le même `palier_group` et leurs volumes sont additionnés pour déterminer le palier commun.
+Accord de reversement entre un industriel et **Entegra**, pour une marque et une catégorie données.
+
+> **Choix de conception** : Entegra étant toujours le signataire, elle n'est pas stockée comme FK — ce serait une valeur constante sans intérêt analytique. Un accord est la table de jonction implicite entre `brand`, `category` et `industrial`. Le champ `palier_group` permet de regrouper plusieurs accords (marques/catégories différentes) sous un même compteur de volume pour le calcul du palier — par exemple, tous les accords Knorr partagent le même `palier_group` et leurs volumes sont additionnés pour déterminer le palier commun. Les accords sont supprimés et réinsérés intégralement à chaque import — il n'y a pas d'historique de versions.
 
 | Colonne | Type | Contrainte | Description |
 |---|---|---|---|
@@ -152,8 +154,6 @@ Table de correspondance entre l'unité de transaction (UF) et l'unité de l'acco
 | `fk_id_industrial` | INT | FK → `industrial`, NOT NULL | Industriel signataire |
 | `fk_id_unit` | INT | FK → `unit`, NOT NULL | Unité dans laquelle les paliers sont exprimés |
 | `palier_group` | VARCHAR(255) | NULL | Groupe de palier partagé entre plusieurs accords (ex : `knorr`, `dressing+maizena+tvb`) |
-| `start_date` | DATE | NULL | Date de début de l'accord |
-| `end_date` | DATE | NULL | Date de fin de l'accord |
 
 ---
 
@@ -184,7 +184,7 @@ Paliers de reversement d'un accord. Chaque ligne définit une tranche de volume 
 Vente effective d'un produit, dans le cadre d'un accord commercial.
 
 > **Choix de conception** :
-> - `fk_id_agreement` permet de remonter à l'accord applicable au moment de la vente.
+> - `fk_id_agreement` permet de remonter à l'accord applicable. Défini en `ON DELETE SET NULL` : si les accords sont réimportés (suppression totale), les transactions conservent leurs données et `fk_id_agreement` passe à `NULL` en attente d'une rerésolution via `resolve_agreements_method()`.
 > - `fk_id_agreement_tier` identifie le palier précis qui a été atteint lors du calcul.
 > - `fk_id_distributor` identifie quel est le distributeur.
 > - `unit_price` et `total_price` sont les prix de vente réel au moment de la transaction. Ils ne doivent pas être recalculés dynamiquement.
@@ -194,7 +194,7 @@ Vente effective d'un produit, dans le cadre d'un accord commercial.
 |---|---|---|---|
 | `id_transaction` | INT | PK, AUTO_INCREMENT | Identifiant unique |
 | `fk_id_product` | INT | FK → `product`, NULL | Produit vendu |
-| `fk_id_agreement` | INT | FK → `agreement`, NULL | Accord applicable (NULL si produit non mappé) |
+| `fk_id_agreement` | INT | FK → `agreement`, NULL, ON DELETE SET NULL | Accord applicable (NULL si produit non mappé ou accords réimportés) |
 | `fk_id_agreement_tier` | INT | FK → `agreement_tier`, NULL | Palier atteint lors du calcul (NULL avant calcul) |
 | `fk_id_distributor` | INT | FK → `distributor`, NULL | Distributeur |
 | `quantity` | INT | NOT NULL | Quantité vendue en colis |
