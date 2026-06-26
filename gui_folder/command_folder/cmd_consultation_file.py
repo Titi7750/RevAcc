@@ -18,6 +18,7 @@ from core_folder.consultation_file import (
     load_consultation_products_method,
     load_consultation_agreements_method,
     load_all_transactions_method,
+    load_all_product_conversions_method,
     load_all_brands_method,
     load_all_categories_method,
     load_all_distributors_method,
@@ -79,6 +80,7 @@ class CmdConsultationPageClass(GuiConsultationPageClass):
             self._fill_table_method(self.table_consult_distributors, load_all_distributors_method())
             self._fill_table_method(self.table_consult_industrials,  load_all_industrials_method())
             self._fill_table_method(self.table_consult_units,        load_all_units_method())
+            self._fill_table_method(self.table_consult_conversions,  load_all_product_conversions_method())
 
         except Exception as exc:
             QMessageBox.warning(

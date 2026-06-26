@@ -159,7 +159,7 @@ def find_product_name_method(param_row: pd.Series, param_mapping: pd.DataFrame) 
 
 def parse_palier_column_name_method(param_column_name: str):
     """
-    Retourne (group_key, min_volume, max_volume_inclusive) ou None.
+    Retourne (group_key, min_volume, max_volume_inclusive) ou None
     - palier_X_25000-35000_uvc    → ('X', 25000, 34999)
     - palier_X_superior-40000_uvc → ('X', 40000, None)
     """

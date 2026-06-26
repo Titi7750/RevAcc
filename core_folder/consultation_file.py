@@ -108,6 +108,27 @@ def load_all_transactions_method() -> list:
 
 # -----
 
+def load_all_product_conversions_method() -> list:
+    """ Retourne toutes les lignes de la table de correspondance """
+
+    with get_connection() as connection:
+        rows = connection.execute(text(
+            """
+            SELECT
+                distributor_name,
+                product_code,
+                transaction_unit,
+                agreement_unit,
+                conversion_factor
+            FROM product_conversion
+            ORDER BY distributor_name, product_code
+            """
+        )).fetchall()
+
+    return [list(row) for row in rows]
+
+# -----
+
 def load_all_brands_method() -> list:
     """ Retourne toutes les marques triées par nom """
 

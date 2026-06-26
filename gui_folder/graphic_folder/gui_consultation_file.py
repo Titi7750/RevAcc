@@ -76,11 +76,15 @@ class GuiConsultationPageClass(QWidget):
         self.table_consult_distributors = self.make_table_method(["Distributeur"])
         self.table_consult_industrials  = self.make_table_method(["Industriel"])
         self.table_consult_units        = self.make_table_method(["Unité"])
+        self.table_consult_conversions  = self.make_table_method(
+            ["Distributeur", "Code produit", "Unité transaction", "Unité accord", "Facteur de conversion"]
+        )
 
         # Ajout des onglets dans le TabWidget
         self.consultation_tabs.addTab(self.table_consult_products,     "Produits")
         self.consultation_tabs.addTab(self.table_consult_accords,      "Accords")
         self.consultation_tabs.addTab(self.table_consult_transactions, "Transactions")
+        self.consultation_tabs.addTab(self.table_consult_conversions,  "Correspondances")
         self.consultation_tabs.addTab(self.table_consult_brands,       "Marques")
         self.consultation_tabs.addTab(self.table_consult_categories,   "Catégories")
         self.consultation_tabs.addTab(self.table_consult_distributors, "Distributeurs")
