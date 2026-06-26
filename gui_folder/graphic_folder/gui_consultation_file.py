@@ -105,7 +105,9 @@ class GuiConsultationPageClass(QWidget):
 
         table = QTableWidget(0, len(param_headers))
         table.setHorizontalHeaderLabels(param_headers)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         return table

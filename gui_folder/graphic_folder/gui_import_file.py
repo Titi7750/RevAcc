@@ -79,7 +79,9 @@ class GuiImportPageClass(QWidget):
 
         self.table_imports = QTableWidget(0, 4)
         self.table_imports.setHorizontalHeaderLabels(["Type", "Fichier", "Statut", "Détail"])
-        self.table_imports.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        imports_header = self.table_imports.horizontalHeader()
+        imports_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        imports_header.setStretchLastSection(True)
         # Le tableau d'historique est toujours en lecture seule
         self.table_imports.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 

@@ -121,11 +121,17 @@ QTableWidget {
     gridline-color: #E7E2EA;
     selection-background-color: #f37c20;
     selection-color: #FFFFFF;
+    outline: 0;
 }
 
 QTableWidget::item {
     padding: 8px;
     border: none;
+}
+
+QTableWidget::item:selected {
+    background-color: #f37c20;
+    color: #FFFFFF;
 }
 
 QHeaderView::section {
@@ -190,6 +196,22 @@ QTextEdit {
 
 QTextEdit:focus {
     border: 1px solid #f37c20;
+}
+
+/* MESSAGE BOX */
+QMessageBox {
+    background-color: #FFFFFF;
+    color: #2D2433;
+}
+
+QMessageBox QLabel {
+    color: #2D2433;
+    background-color: transparent;
+    font-size: 14px;
+}
+
+QMessageBox QPushButton {
+    min-width: 80px;
 }
 
 /* PROGRESS BAR */
