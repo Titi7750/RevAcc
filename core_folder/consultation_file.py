@@ -59,11 +59,6 @@ def load_consultation_agreements_method() -> list:
                 SELECT
                     industrial.industrial_name,
                     CONCAT(brand.brand_name, ' - ', category.category_name) AS produit,
-                    CASE
-                        WHEN agreement.start_date IS NULL AND agreement.end_date IS NULL THEN 'Toutes périodes'
-                        WHEN agreement.end_date IS NULL THEN CONCAT('Depuis ', agreement.start_date)
-                        ELSE CONCAT(agreement.start_date, ' - ', agreement.end_date)
-                    END AS periode,
                     GROUP_CONCAT(
                         CONCAT(
                             agreement_tier.min_volume, ' - ',

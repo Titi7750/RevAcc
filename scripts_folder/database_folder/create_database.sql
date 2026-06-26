@@ -118,8 +118,6 @@ CREATE TABLE `agreement` (
     `fk_id_industrial`   INT NOT NULL,
     `fk_id_unit`         INT NOT NULL,
     `palier_group`       VARCHAR(255) NULL,
-    `start_date`         DATE NULL,
-    `end_date`           DATE NULL,
     PRIMARY KEY (`id_agreement`),
     FOREIGN KEY (`fk_id_brand`)
         REFERENCES `brand`(`id_brand`)
@@ -175,7 +173,7 @@ CREATE TABLE `transaction` (
         ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_agreement`)
         REFERENCES `agreement`(`id_agreement`)
-        ON DELETE CASCADE ON UPDATE CASCADE,
+        ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (`fk_id_agreement_tier`)
         REFERENCES `agreement_tier`(`id_agreement_tier`)
         ON DELETE SET NULL ON UPDATE CASCADE,

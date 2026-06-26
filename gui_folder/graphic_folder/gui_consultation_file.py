@@ -64,7 +64,7 @@ class GuiConsultationPageClass(QWidget):
             ["Produit", "Marque - Catégorie", "Unité", "Statut"]
         )
         self.table_consult_accords = self.make_table_method(
-            ["Industriel", "Marque - Catégorie", "Période", "Taux", "Statut"]
+            ["Industriel", "Marque - Catégorie", "Taux", "Statut"]
         )
         self.table_consult_transactions = self.make_table_method(
             ["Date", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"]

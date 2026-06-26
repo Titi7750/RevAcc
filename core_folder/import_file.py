@@ -351,15 +351,9 @@ def import_transactions(
         for column in ("product_code", "description", "data_source"):
             database_product[column] = database_product[column].fillna("").astype(str).replace("nan", "")
 
-        # Accords actifs uniquement (end_date >= aujourd'hui), le plus récent en premier
-        # drop_duplicates conserve un seul accord par (fk_id_brand, fk_id_category)
+        # Un seul accord par (fk_id_brand, fk_id_category)
         database_agreement = pd.read_sql(
-            text("""
-                SELECT id_agreement, fk_id_brand, fk_id_category
-                FROM agreement
-                WHERE end_date >= CURDATE()
-                ORDER BY start_date DESC
-            """),
+            text("SELECT id_agreement, fk_id_brand, fk_id_category FROM agreement"),
             connection
         )
 
@@ -715,20 +709,12 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     """
     Import d'un fichier Excel de mapping (format mapping_product.xlsx)
 
-    Stratégie historique — aucune suppression :
-    - Accord identique (palier_group + prix inchangés)
-        → prolongation de end_date (même id_agreement)
-    - Accord modifié (l'un des éléments ci-dessus a changé)
-        → fermeture de l'ancien + création du nouveau
-    - Nouvel accord
-        → création
-    - Accord absent du nouveau fichier
-        → fermeture (end_date = 31/12 année précédente)
-
-    Les dates sont cadrées sur l'année civile courante (01/01 → 31/12)
+    Stratégie : suppression totale puis réinsertion
+    Tous les accords et paliers existants sont supprimés, puis les nouveaux
+    sont insérés depuis le fichier. Les transactions dont fk_id_agreement
+    pointait vers un ancien accord passent automatiquement à NULL (ON DELETE SET NULL)
+    Appeler resolve_agreements_method() après l'import pour rerésoudre les FK
     """
-
-    # -----
 
     def _progression_bar(param_percentage: int, param_message: str) -> None:
         """ Met à jour la barre de progression """
@@ -738,9 +724,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
         return None
 
-    # -----
-
-    # ── Étape 1 : Lecture et validation du fichier ───────────────────────
+    # ── Étape 1 : Lecture et validation du fichier ───────────────────────────
     _progression_bar(0, "Lecture du fichier accords…")
 
     excel_file = pd.ExcelFile(param_file_path)
@@ -778,7 +762,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
     mapping["palier_group"] = mapping.apply(_detect_palier_group, axis=1)
 
-    # ── Étape 2 : Alimentation des tables de référence ───────────────────
+    # ── Étape 2 : Alimentation des tables de référence ───────────────────────
     _progression_bar(10, "Mise à jour des tables de référence…")
 
     with get_connection() as connection:
@@ -798,75 +782,17 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     id_unit_uvc   = int(database_unit.loc[database_unit["unit_name"] == "UVC", "id_unit"].iloc[0])
     id_industrial = int(database_industrial.loc[database_industrial["industrial_name"] == INDUSTRIAL_NAME, "id_industrial"].iloc[0])
 
-    # ── Étape 3 : Chargement des accords et produits existants ───────────
-    _progression_bar(20, "Comparaison avec les accords existants…")
+    # ── Étape 3 : Suppression de tous les accords et paliers existants ───────
+    # agreement_tier est supprimé en cascade depuis agreement (ON DELETE CASCADE).
+    # Les transactions passent automatiquement à fk_id_agreement = NULL (ON DELETE SET NULL).
+    # Appeler resolve_agreements_method() après cet import pour rerésoudre les FK.
+    _progression_bar(25, "Suppression des accords existants…")
 
     with get_connection() as connection:
-        database_agreement = pd.read_sql(
-            text("SELECT id_agreement, fk_id_brand, fk_id_category, palier_group, end_date FROM agreement"),
-            connection
-        )
+        connection.execute(text("DELETE FROM agreement"))
+        connection.commit()
 
-        database_agreement_tiers = pd.read_sql(
-            text("SELECT fk_id_agreement, min_volume, max_volume, price FROM agreement_tier"),
-            connection
-        )
-
-    # Accord le plus récent par (fk_id_brand, fk_id_category), toutes années confondues
-    most_recent_by_key: dict = {}
-    if not database_agreement.empty:
-        most_recent_dataframe = (
-            database_agreement
-            .sort_values("end_date", ascending=False, na_position="first")
-            .drop_duplicates(subset=["fk_id_brand", "fk_id_category"], keep="first")
-        )
-
-        for _, agreement_row in most_recent_dataframe.iterrows():
-            key = (int(agreement_row["fk_id_brand"]), int(agreement_row["fk_id_category"]))
-            most_recent_by_key[key] = agreement_row
-
-    # -----
-
-    def _database_tier_structure(param_id_agreement: int) -> dict:
-        """ Retourne {(min_volume, max_volume): price} pour un accord existant en base """
-
-        agreement_tiers = database_agreement_tiers[database_agreement_tiers["fk_id_agreement"] == param_id_agreement]
-
-        return {
-            (int(row["min_volume"]), int(row["max_volume"]) if pd.notna(row["max_volume"]) else None): round(float(row["price"]), 2)
-            for _, row in agreement_tiers.iterrows()
-        }
-
-    # -----
-
-    def _excel_tier_structure(param_brand_name: str, param_category_name: str, param_palier_group: str) -> dict:
-        """ Retourne {(min_volume, max_volume): price} depuis les colonnes palier du fichier Excel """
-
-        reference_rows = mapping[(mapping["brand"] == param_brand_name) & (mapping["categories"] == param_category_name)]
-        if reference_rows.empty:
-            return {}
-
-        reference_row = reference_rows.iloc[0]
-        result = {}
-        for column in palier_columns:
-            parsed = parse_palier_column_name_method(column)
-            if not parsed:
-                continue
-
-            group, min_volume, max_volume = parsed
-            if group != param_palier_group:
-                continue
-
-            price = reference_row.get(column)
-            if pd.notna(price):
-                result[(min_volume, max_volume)] = round(float(price), 2)
-
-        return result
-
-    # -----
-
-    # ── Étape 4 : Construction de la liste de travail ────────────────────
-
+    # ── Étape 4 : Construction de la liste de travail ────────────────────────
     # copy() pour éviter le SettingWithCopyWarning lors de l'itération sur mapping_work
     mapping_work = mapping[["brand", "categories", "palier_group"]].drop_duplicates(subset=["brand", "categories"]).copy()
     mapping_work = mapping_work.merge(
@@ -876,98 +802,24 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
         database_category.rename(columns={"category_name": "categories"}), on="categories", how="left"
     )
 
-    # ── Étape 5 : Catégorisation des accords (créer / prolonger / fermer) ────
-    _progression_bar(30, "Analyse des accords à créer, prolonger ou fermer…")
-
-    current_year   = date.today().year
-    start_date_new = date(current_year, 1, 1)
-    end_date_new   = date(current_year, 12, 31)
-    end_date_close = date(current_year - 1, 12, 31)
-
-    to_extend: list = []  # [id_agreement] → prolonger end_date jusqu'à fin année courante
-    to_close:  list = []  # [id_agreement] → fermer à fin année précédente
-    to_create: list = []  # [work_row]     → insérer comme nouvel accord
-
-    new_keys: set = set()
-
-    # Parcours du fichier Excel pour déterminer les actions à mener sur les accords
-    # (création, prolongation, fermeture) en comparant avec les accords en base de données
-    for _, work_row in mapping_work.iterrows():
-        if pd.isna(work_row.get("id_brand")) or pd.isna(work_row.get("id_category")):
-            continue
-
-        id_brand_int    = int(work_row["id_brand"])
-        id_category_int = int(work_row["id_category"])
-        palier_group    = work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None
-        new_keys.add((id_brand_int, id_category_int))
-
-        existing = most_recent_by_key.get((id_brand_int, id_category_int))
-
-        if existing is None:
-            # Aucun accord existant → créer
-            to_create.append(work_row)
-        else:
-            existing_id = int(existing["id_agreement"])
-            existing_palier_group = existing.get("palier_group") if pd.notna(existing.get("palier_group")) else None
-
-            structure_database = _database_tier_structure(param_id_agreement=existing_id)
-            structure_excel = _excel_tier_structure(
-                param_brand_name=work_row["brand"],
-                param_category_name=work_row["categories"],
-                param_palier_group=palier_group
-            )
-
-            accord_unchanged = (
-                existing_palier_group == palier_group
-                and structure_database == structure_excel
-            )
-
-            if accord_unchanged:
-                # Accord identique → prolonger end_date (même id_agreement conservé)
-                to_extend.append(existing_id)
-            else:
-                # Accord modifié → fermer l'ancien + créer le nouveau
-                to_close.append(existing_id)
-                to_create.append(work_row)
-
-    # Accords présents en base mais absents du nouveau fichier → fermer
-    for agreement_key, agreement_row in most_recent_by_key.items():
-        if agreement_key not in new_keys:
-            to_close.append(int(agreement_row["id_agreement"]))
-
-    # ── Étape 6 : Application des mises à jour (extension et fermeture) ──
-    _progression_bar(40, "Mise à jour des accords existants…")
-
-    with get_connection() as connection:
-        for id_agreement in to_extend:
-            connection.execute(
-                text("UPDATE agreement SET end_date = :end_date WHERE id_agreement = :id"),
-                {"end_date": end_date_new, "id": id_agreement},
-            )
-
-        for id_agreement in to_close:
-            connection.execute(
-                text("UPDATE agreement SET end_date = :end_date WHERE id_agreement = :id"),
-                {"end_date": end_date_close, "id": id_agreement},
-            )
-
-        connection.commit()
-
-    # ── Étape 7 : Insertion des nouveaux accords ──────────────────────────
-    _progression_bar(50, "Insertion des nouveaux accords…")
+    # ── Étape 5 : Insertion des nouveaux accords ──────────────────────────────
+    _progression_bar(40, "Insertion des nouveaux accords…")
 
     insert_agreement_sql = text("""
         INSERT INTO agreement
-            (fk_id_brand, fk_id_category, fk_id_industrial, fk_id_unit,
-            palier_group, start_date, end_date)
+            (fk_id_brand, fk_id_category, fk_id_industrial, fk_id_unit, palier_group)
         VALUES
-            (:fk_id_brand, :fk_id_category, :fk_id_industrial, :fk_id_unit,
-            :palier_group, :start_date, :end_date)
+            (:fk_id_brand, :fk_id_category, :fk_id_industrial, :fk_id_unit, :palier_group)
     """)
 
     new_agreement_rows: list = []
     with get_connection() as connection:
-        for work_row in to_create:
+
+        # Insère un accord par (fk_id_brand, fk_id_category) unique
+        for _, work_row in mapping_work.iterrows():
+            if pd.isna(work_row.get("id_brand")) or pd.isna(work_row.get("id_category")):
+                continue
+
             result = connection.execute(
                 insert_agreement_sql,
                 {
@@ -976,16 +828,14 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                     "fk_id_industrial": id_industrial,
                     "fk_id_unit":       id_unit_uvc,
                     "palier_group":     work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None,
-                    "start_date":       start_date_new,
-                    "end_date":         end_date_new,
                 },
             )
             new_agreement_rows.append((work_row, int(result.lastrowid)))
 
         connection.commit()
 
-    # ── Étape 8 : Insertion des paliers pour les nouveaux accords ─────────
-    _progression_bar(80, "Insertion des paliers…")
+    # ── Étape 6 : Insertion des paliers ───────────────────────────────────────
+    _progression_bar(70, "Insertion des paliers…")
 
     insert_tier_sql = text("""
         INSERT INTO agreement_tier (fk_id_agreement, min_volume, max_volume, price)
@@ -1022,8 +872,8 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                     insert_tier_sql,
                     {
                         "fk_id_agreement": new_id_agreement,
-                        "min_volume":         min_volume,
-                        "max_volume":         max_volume,
+                        "min_volume": min_volume,
+                        "max_volume": max_volume,
                         "price":           float(price),
                     },
                 )
@@ -1031,15 +881,64 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
         connection.commit()
 
-    _progression_bar(
-        100,
-        f"{len(new_agreement_rows)} accords créés, {len(to_extend)} prolongés, "
-        f"{len(to_close)} archivés — {tier_count} paliers insérés.",
-    )
+    _progression_bar(100, f"{len(new_agreement_rows)} accords insérés — {tier_count} paliers insérés.")
 
     return {
         "agreements": len(new_agreement_rows),
-        "extended":   len(to_extend),
-        "closed":     len(to_close),
         "tiers":      tier_count,
+    }
+
+# -----
+
+def resolve_agreements_method(param_progress_callback=None) -> dict:
+    """
+    Rerésout fk_id_agreement sur toutes les transactions dont la FK est NULL.
+
+    À appeler après import_agreements() pour que les transactions existantes
+    retrouvent un accord valide. La résolution se fait via (fk_id_brand, fk_id_category)
+    du produit associé à chaque transaction.
+
+    Retourne un résumé : transactions mises à jour, transactions toujours sans accord.
+    """
+
+    # -----
+
+    def _progression_bar(param_percentage: int, param_message: str) -> None:
+        if param_progress_callback:
+            param_progress_callback(param_percentage, param_message)
+
+    # -----
+
+    _progression_bar(0, "Rerésolution des accords sur les transactions…")
+
+    # Met à jour fk_id_agreement sur toutes les transactions sans accord,
+    # en joignant product → brand/category → agreement
+    # Les transactions sans produit ou sans accord correspondant restent à NULL
+    resolve_sql = text("""
+        UPDATE transaction
+        JOIN product ON product.id_product = transaction.fk_id_product
+        JOIN agreement ON agreement.fk_id_brand = product.fk_id_brand
+            AND agreement.fk_id_category = product.fk_id_category
+        SET transaction.fk_id_agreement = agreement.id_agreement
+        WHERE transaction.fk_id_agreement IS NULL
+            AND transaction.fk_id_product IS NOT NULL
+    """)
+
+    count_sql = text("""
+        SELECT
+            SUM(CASE WHEN fk_id_agreement IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
+            SUM(CASE WHEN fk_id_agreement IS NULL THEN 1 ELSE 0 END) AS unresolved
+        FROM transaction
+    """)
+
+    with get_connection() as connection:
+        connection.execute(resolve_sql)
+        connection.commit()
+        result = connection.execute(count_sql).fetchone()
+
+    _progression_bar(100, "Rerésolution terminée.")
+
+    return {
+        "resolved":   int(result[0] or 0),
+        "unresolved": int(result[1] or 0),
     }

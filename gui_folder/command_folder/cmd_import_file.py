@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 # Import personal functions
 from gui_folder.graphic_folder.gui_import_file import GuiImportPageClass
 # -----
-from core_folder.import_file import import_transactions, import_agreements, import_conversions
+from core_folder.import_file import import_transactions, import_agreements, import_conversions, resolve_agreements_method
 
 # Custom variable type construction
 ## None
@@ -63,6 +63,10 @@ class ImportWorker(QThread):
                 import_result = import_conversions(self.file_path, self.progress.emit)
             else:
                 import_result = import_agreements(self.file_path, self.progress.emit)
+                # Rerésolution des FK sur les transactions après suppression des accords
+                resolve_result = resolve_agreements_method()
+                import_result["resolved"]   = resolve_result["resolved"]
+                import_result["unresolved"] = resolve_result["unresolved"]
 
             self.finished.emit(import_result)
 
@@ -144,9 +148,8 @@ class CmdImportPageClass(GuiImportPageClass):
             reply = QMessageBox.question(
                 self,
                 "Confirmation — Import accords",
-                "L'import va mettre à jour les accords commerciaux.\n"
-                "Les accords modifiés seront archivés, les accords identiques prolongés.\n"
-                "Aucune donnée ne sera supprimée.\n\n"
+                "L'import va supprimer tous les accords existants et les remplacer par ceux du fichier.\n"
+                "Les transactions seront automatiquement rerésoluees sur les nouveaux accords.\n\n"
                 "Continuer ?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -219,10 +222,10 @@ class CmdImportPageClass(GuiImportPageClass):
             result_detail = f"{param_result['processed']} correspondances importées"
         else:
             result_detail = (
-                f"{param_result['agreements']} accords créés, "
-                f"{param_result.get('extended', 0)} prolongés, "
-                f"{param_result.get('closed', 0)} archivés — "
-                f"{param_result['tiers']} paliers insérés"
+                f"{param_result['agreements']} accords insérés - "
+                f"{param_result['tiers']} paliers - "
+                f"{param_result.get('resolved', 0)} transactions rerésoluees"
+                + (f" ({param_result.get('unresolved', 0)} sans accord)" if param_result.get("unresolved", 0) else "")
             )
 
         # Mise à jour de la ligne dans le tableau d'historique
