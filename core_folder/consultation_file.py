@@ -66,8 +66,7 @@ def load_consultation_agreements_method() -> list:
                             agreement_tier.price, ' €/', unit.unit_name
                         )
                         ORDER BY agreement_tier.min_volume SEPARATOR ' | '
-                    ) AS taux,
-                    'Actif' AS status
+                    ) AS taux
                 FROM agreement
                 JOIN industrial          ON industrial.id_industrial       = agreement.fk_id_industrial
                 JOIN brand               ON brand.id_brand                 = agreement.fk_id_brand

@@ -141,7 +141,8 @@ class CmdImportPageClass(GuiImportPageClass):
                 "",
                 "Fichiers Excel (*.xlsx)",
             )
-            mapping_path = mapping_path or None
+            if not mapping_path:
+                return
 
         # Confirmation obligatoire avant l'import des accords (opération destructive)
         if param_file_type == "accords":

@@ -5,7 +5,7 @@
 ## None
 
 # Import third party packages
-import pandas as pd
+## None
 
 # Import modules from third party packages
 from sqlalchemy import text
@@ -31,7 +31,6 @@ def load_dashboard_kpis_method() -> dict:
             text("SELECT COUNT(*) FROM product")
         ).scalar() or 0
 
-        # Nombre de transactions avec au moins une FK manquante
         product_null_count = connection.execute(
             text(
                 """
@@ -41,7 +40,6 @@ def load_dashboard_kpis_method() -> dict:
             )
         ).scalar() or 0
 
-        # Nombre de transactions avec au moins une FK manquante
         agreement_null_count = connection.execute(
             text(
                 """
@@ -51,7 +49,6 @@ def load_dashboard_kpis_method() -> dict:
             )
         ).scalar() or 0
 
-        # Nombre de transactions avec au moins une FK manquante
         distributor_null_count = connection.execute(
             text(
                 """
