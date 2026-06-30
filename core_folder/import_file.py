@@ -213,7 +213,7 @@ def import_transactions(
 
     # -----
 
-    # ── Étape 1 : Lecture et normalisation des colonnes ──────────────────────
+    # ── Étape 1a : Lecture et normalisation des colonnes ─────────────────────
     _progression_bar(0, "Lecture du fichier…")
 
     dataframe = pd.read_excel(param_file_path)
@@ -304,7 +304,7 @@ def import_transactions(
 
         connection.commit()
 
-    # ── Étape 3 : Chargement du catalogue ────────────────────────────────────
+    # ── Étape 3a : Chargement du catalogue ───────────────────────────────────
     _progression_bar(25, "Chargement du catalogue produits…")
 
     with get_connection() as connection:
@@ -402,7 +402,8 @@ def import_transactions(
         # le produit est ignoré silencieusement
         # Il ne sera jamais inséré en base → les transactions liées à ce produit seront également
         # ignorées (skippées dans la boucle d'insertion des transactions) et n'apparaîtront
-        # pas du tout dans la table transaction, voir quoi faire si on veut logguer les produits ignorés
+        # pas du tout dans la table transaction
+        # TODO : envisager un mécanisme de log pour les produits ignorés
         if not all([id_brand, id_category, id_unit, id_datasource]):
             continue
 
@@ -478,7 +479,7 @@ def import_transactions(
                 SELECT product.id_product, product.product_name, product.product_code, product.description,
                     product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name AS data_source
                 FROM product
-                JOIN data_source data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
+                JOIN data_source AS data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
                 ORDER BY product.id_product
             """),
             connection
