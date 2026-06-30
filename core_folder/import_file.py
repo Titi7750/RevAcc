@@ -275,7 +275,7 @@ def import_transactions(
 
     mapping_keywords = pd.read_excel(param_mapping_path, sheet_name="mapping_products")
 
-# On boucle sur chaque ligne du dataframe pour trouver le product_name correspondant via le keyword matching
+    # On boucle sur chaque ligne du dataframe pour trouver le product_name correspondant via le keyword matching
     dataframe["product_name"] = dataframe.apply(
         lambda row: find_product_name_method(row, mapping_keywords), axis=1
     )
@@ -315,7 +315,7 @@ def import_transactions(
         database_product = pd.read_sql(
             text("""
                 SELECT product.id_product, product.product_name, product.product_code, product.description,
-                product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name as data_source
+                product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name AS data_source
                 FROM product
                 JOIN data_source AS data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
                 ORDER BY product.id_product
@@ -874,8 +874,12 @@ def resolve_agreements_method(param_progress_callback=None) -> None:
     # -----
 
     def _progression_bar(param_percentage: int, param_message: str) -> None:
+        """ Met à jour la barre de progression """
+
         if param_progress_callback:
             param_progress_callback(param_percentage, param_message)
+
+        return None
 
     # -----
 
