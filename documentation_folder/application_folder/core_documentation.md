@@ -394,9 +394,9 @@ existing_keys = set(zip(
 - Les produits du fichier qui n'existent pas encore en base sont insérés.
 - La catégorie est déduite du `product_name` via le mapping (`product_name → category_name`).
 - Si le `product_name` n'est pas résolu, la catégorie par défaut `"Non catégorisé"` est utilisée.
-- Les produits existants dont le `product_name` est maintenant résolu voient leur `product_name` et `fk_id_category` mis à jour.
+- Les produits déjà existants en base voient leur `product_name` et `fk_id_category` mis à jour (`UPDATE`) à partir du mapping courant — il n'y a jamais de suppression de produits.
 
-> **Pourquoi vider puis réinsérer ?** Le mapping peut évoluer : un produit classé dans la mauvaise catégorie peut être corrigé en modifiant le fichier de mapping. La réinsertion garantit que la base reflète toujours l'état courant du mapping.
+> **Pourquoi mettre à jour les produits existants ?** Le mapping peut évoluer : un produit classé dans la mauvaise catégorie peut être corrigé en modifiant le fichier de mapping et en réimportant. La mise à jour ciblée garantit que la base reflète l'état courant du mapping.
 
 ---
 
@@ -521,7 +521,6 @@ WHERE transaction.fk_id_agreement IS NULL
 ```
 
 - Relie chaque transaction à un accord via la paire `(marque, catégorie)` de son produit.
-- Retourne un résumé `{"resolved": resolved_count, "unresolved": unresolved_count}`.
 
 ---
 
@@ -863,7 +862,12 @@ dashboard_file.py
 1. import_conversions()        ← table_correspondance.xlsx (facteurs de conversion)
 2. import_agreements()         ← mapping_product.xlsx (accords + paliers)
 3. import_transactions()       ← product_detail_export.xlsx (transactions brutes)
-4. resolve_agreements_method() ← relie les transactions aux accords après l'import
+                                  résout fk_id_agreement via (fk_id_brand, fk_id_category)
+                                  — nécessite que les accords existent déjà en base
+4. resolve_agreements_method() ← relie les transactions qui seraient passées à NULL
+                                  (cas d'une réimportation d'accords après les transactions)
 5. run_calculation_method()    ← calcule les revenus
 6. export_calculation_method() ← exporte les résultats dans un Excel
 ```
+
+> **Important :** `import_agreements()` doit impérativement précéder `import_transactions()`. La résolution de `fk_id_agreement` se fait à l'étape 4 de `import_transactions()` via la paire `(fk_id_brand, fk_id_category)` du produit — si la table `agreement` est vide à ce moment-là, toutes les transactions sont insérées avec `fk_id_agreement = NULL`. `resolve_agreements_method()` reste utile si les accords sont réimportés (et donc supprimés puis recréés) après que des transactions existent déjà en base.
