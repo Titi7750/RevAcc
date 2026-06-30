@@ -30,6 +30,7 @@ def get_engine_method():
     """ Get the SQLAlchemy engine for the database connection """
 
     global _ENGINE
+    # On crée le moteur une seule fois, puis on le réutilise à chaque appel (pattern singleton)
     if _ENGINE is None:
         user     = os.getenv("DB_USER", "root")
         password = os.getenv("DB_PASSWORD", "")
@@ -38,8 +39,8 @@ def get_engine_method():
         name     = os.getenv("DB_NAME", "rev_acc_database")
         _ENGINE = create_engine(
             f"mysql+pymysql://{user}:{password}@{host}:{port}/{name}",
-            pool_pre_ping=True,
-            pool_recycle=3600,
+            pool_pre_ping=True, # vérifie que la connexion est toujours active avant de l'utiliser
+            pool_recycle=3600,  # renouvelle les connexions inactives après 1h (évite les timeouts MySQL)
         )
 
     return _ENGINE
@@ -69,9 +70,11 @@ def get_or_create(param_connection, param_table: str, param_column_name: str, pa
         {"value": param_value}
     ).fetchone()
 
+    # Si elle existe, on retourne son ID sans rien créer
     if row:
         return int(row[0])
 
+    # Sinon on l'insère et on retourne l'ID de la nouvelle ligne
     result = param_connection.execute(
         text(f"INSERT INTO `{param_table}` (`{param_column_name}`) VALUES (:value)"),
         {"value": param_value},
@@ -85,6 +88,8 @@ def get_or_create(param_connection, param_table: str, param_column_name: str, pa
 def get_or_create_many(param_connection, param_table: str, param_column_name: str, param_values) -> dict:
     """ Applique get_or_create aux valeurs uniques valides, retourne un dictionnaire {value: id} """
 
+    # On dédoublonne d'abord pour n'appeler get_or_create qu'une fois par valeur distincte
+    # (ex : si 500 transactions ont le même distributeur, on ne fait qu'un seul SELECT/INSERT)
     unique_values = {value for value in param_values if value is not None and str(value) not in ("", "nan")}
 
     return {value: get_or_create(param_connection, param_table, param_column_name, value) for value in unique_values}

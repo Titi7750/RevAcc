@@ -64,9 +64,7 @@ class ImportWorker(QThread):
             else:
                 import_result = import_agreements(self.file_path, self.progress.emit)
                 # Rerésolution des FK sur les transactions après suppression des accords
-                resolve_result = resolve_agreements_method()
-                import_result["resolved"]   = resolve_result["resolved"]
-                import_result["unresolved"] = resolve_result["unresolved"]
+                resolve_agreements_method()
 
             self.finished.emit(import_result)
 
@@ -149,8 +147,7 @@ class CmdImportPageClass(GuiImportPageClass):
             reply = QMessageBox.question(
                 self,
                 "Confirmation — Import accords",
-                "L'import va supprimer tous les accords existants et les remplacer par ceux du fichier.\n"
-                "Les transactions seront automatiquement rerésoluees sur les nouveaux accords.\n\n"
+                "L'import va supprimer tous les accords existants et les remplacer par ceux du fichier.\n\n"
                 "Continuer ?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
@@ -224,9 +221,7 @@ class CmdImportPageClass(GuiImportPageClass):
         else:
             result_detail = (
                 f"{param_result['agreements']} accords insérés - "
-                f"{param_result['tiers']} paliers - "
-                f"{param_result.get('resolved', 0)} transactions rerésoluees"
-                + (f" ({param_result.get('unresolved', 0)} sans accord)" if param_result.get("unresolved", 0) else "")
+                f"{param_result['tiers']} paliers"
             )
 
         # Mise à jour de la ligne dans le tableau d'historique

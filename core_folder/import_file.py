@@ -147,6 +147,7 @@ def find_product_name_method(param_row: pd.Series, param_mapping: pd.DataFrame) 
         ]
 
         # Compter le nombre de mots-clés présents dans la description normalisée
+        # Avec le in operator, on peut trouver des correspondances singulier/pluriel (ex : "SEAU" dans "SEAUX")
         matched = sum(1 for keyword_other in keywords_others if keyword_other in description_norm)
 
         if matched > 0 and matched > best_score:
@@ -183,18 +184,20 @@ def import_transactions(
     param_mapping_path: str | None = None,
 ) -> dict:
     """
-    Import d'un fichier Excel de transactions.
+    Import d'un fichier Excel de transactions au format brut (product_detail_export.xlsx)
 
-    Format accepté :
-        - Format brut  : modèle fichier product_detail_export.xlsx
+    Pipeline : normalisation des colonnes et des unités → détection des marques →
+    keyword matching → insertion/mise à jour du catalogue → insertion des transactions
 
-    La pipeline complète est exécutée :
-    normalisation des colonnes et des unités, détection des marques, keyword matching
-    pour résoudre product_name et catégorie, puis insertion des nouveaux produits
-
-    param_transaction_date : date à associer à toutes les transactions importées. Par défaut : date du jour de l'import
-    param_mapping_path : récupérer le fichier mapping_product.xlsx -> Obligatoire
+    param_transaction_date : date associée à toutes les transactions. Par défaut : date du jour
+    param_mapping_path : chemin vers mapping_product.xlsx — obligatoire
     """
+
+    if not param_mapping_path:
+        raise ValueError(
+            "param_mapping_path est requis. "
+            "Fournissez le chemin vers mapping_product.xlsx depuis l'interface."
+        )
 
     transaction_date = param_transaction_date or date.today()
 
@@ -217,115 +220,86 @@ def import_transactions(
     dataframe.dropna(how="all", inplace=True)
     dataframe.reset_index(drop=True, inplace=True) # Réindexer après suppression des lignes vides
 
-    # Supprimer les lignes de métadonnées (ex : pied de page "Filtres appliqués" ou "filtres appliqués" des exports filtrés)
+    # Supprimer les lignes de métadonnées (ex : pied de page "Filtres appliqués")
     filter_mask = dataframe.apply(
         lambda row: row.astype(str).str.contains("Filtres appliqués", case=False, na=False).any(),
         axis=1
     )
-
+    # Vérifier si au moins une ligne correspond au filtre
     if filter_mask.any():
         dataframe = dataframe[~filter_mask].reset_index(drop=True)
 
-    # Auto-détection du format : renommage des colonnes
-    is_raw_format = "DISTRIBUTEUR" in dataframe.columns
-    if is_raw_format:
-        dataframe = dataframe.rename(columns=RAW_COLUMN_MAP)
-        quantity_column = next((column for column in dataframe.columns if "Fac" in column or "fac" in column), None)
-
-        if quantity_column:
-            dataframe = dataframe.rename(columns={quantity_column: "quantity"})
-
-        if "Montant HT" in dataframe.columns:
-            dataframe = dataframe.rename(columns={"Montant HT": "amount_ht"})
-
-    # ── Étape 1b : Nettoyage et keyword matching (format brut uniquement) ────
-    if is_raw_format:
-        _progression_bar(5, "Attribution des noms produits…")
-
-        # Normalisation des codes unités (BTE → BOÎTE, U → UNITÉ, etc.)
-        if "unit" in dataframe.columns:
-            dataframe["unit"] = dataframe["unit"].str.upper().replace(RAW_UNIT_MAP)
-
-        # Correction des codes produits connus (HELLMANNSQUEEZE → HELLMANN'S SQUEEZE, etc.)
-        if "product_code" in dataframe.columns:
-            dataframe["product_code"] = dataframe["product_code"].str.upper().replace(RAW_CODE_MAP)
-
-        # Détection de la marque depuis la description et le code produit
-        for brand_keyword in DESCRIPTION_BRAND_KEYWORDS:
-            mask_description = dataframe["description"].str.contains(brand_keyword, case=False, na=False)
-            mask_code = (
-                dataframe["product_code"].str.contains(brand_keyword, case=False, na=False)
-                if "product_code" in dataframe.columns
-                else pd.Series(False, index=dataframe.index)
-            )
-            dataframe.loc[mask_description | mask_code, "brand"] = brand_keyword
-
-        # Title case sur toutes les colonnes texte + correction des majuscules après apostrophe
-        for column in dataframe.select_dtypes(include=["object"]).columns:
-            dataframe[column] = (
-                dataframe[column]
-                .str.title()
-                .str.replace(r"(?<=')([A-Z])", lambda match: match.group(0).lower(), regex=True)
-            )
-
-        # Correction des marques après title case (Hellmanns → Hellmann's, etc.)
-        if "brand" in dataframe.columns:
-            dataframe["brand"] = dataframe["brand"].map(
-                lambda brand: BRAND_CORRECTION.get(brand, brand) if pd.notna(brand) else brand
-            )
-
-        # Keyword matching pour résoudre product_name ET catégorie.
-        # Seule source fiable pour les marques multi-catégories (Amora, Knorr, etc.)
-        if not param_mapping_path:
-            raise ValueError(
-                "param_mapping_path est requis pour importer un fichier au format brut. "
-                "Fournissez le chemin vers mapping_product.xlsx depuis l'interface."
-            )
-
-        mapping_keywords = pd.read_excel(param_mapping_path, sheet_name="mapping_products")
-
-        # On boucle sur chaque ligne du dataframe pour trouver le product_name correspondant via le keyword matching
-        dataframe["product_name"] = dataframe.apply(
-            lambda row: find_product_name_method(row, mapping_keywords), axis=1
+    if "DISTRIBUTEUR" not in dataframe.columns:
+        raise ValueError(
+            "Format de fichier non reconnu : colonne 'DISTRIBUTEUR' absente. "
+            "Importez un fichier au format brut (product_detail_export.xlsx)."
         )
 
-    # Vérification des colonnes minimales requises
-    required = {"distributor", "product_name", "quantity", "amount_ht"}
-    missing = required - set(dataframe.columns)
-    if missing:
-        raise ValueError(f"Colonnes manquantes dans le fichier : {missing}")
+    dataframe = dataframe.rename(columns=RAW_COLUMN_MAP)
 
+    # next() permet de trouver la première colonne contenant "Fac" ou "fac" dans son nom
+    quantity_column = next((column for column in dataframe.columns if "Fac" in column or "fac" in column), None)
+    if quantity_column:
+        dataframe = dataframe.rename(columns={quantity_column: "quantity"})
+
+    if "Montant HT" in dataframe.columns:
+        dataframe = dataframe.rename(columns={"Montant HT": "amount_ht"})
+
+    # ── Étape 1b : Nettoyage et keyword matching ─────────────────────────────
+    _progression_bar(5, "Attribution des noms produits…")
+
+    dataframe["unit"]         = dataframe["unit"].str.upper().replace(RAW_UNIT_MAP)
+    dataframe["product_code"] = dataframe["product_code"].str.upper().replace(RAW_CODE_MAP)
+
+    # Détection de la marque depuis la description et le code produit
+    for brand_keyword in DESCRIPTION_BRAND_KEYWORDS:
+        mask = (
+            dataframe["description"].str.contains(brand_keyword, case=False, na=False) |
+            dataframe["product_code"].str.contains(brand_keyword, case=False, na=False)
+        )
+        dataframe.loc[mask, "brand"] = brand_keyword
+
+    # Title case sur toutes les colonnes texte + correction des majuscules après apostrophe
+    # object est le type de données pour les colonnes texte dans pandas
+    for column in dataframe.select_dtypes(include=["object"]).columns:
+        dataframe[column] = (
+            dataframe[column]
+            .str.title()
+            .str.replace(r"(?<=')([A-Z])", lambda match: match.group(0).lower(), regex=True)
+        )
+
+    # Correction des marques après title case (Hellmanns → Hellmann's, etc.)
+    dataframe["brand"] = dataframe["brand"].map(
+        lambda brand: BRAND_CORRECTION.get(brand, brand) if pd.notna(brand) else brand
+    )
+
+    mapping_keywords = pd.read_excel(param_mapping_path, sheet_name="mapping_products")
+
+# On boucle sur chaque ligne du dataframe pour trouver le product_name correspondant via le keyword matching
+    dataframe["product_name"] = dataframe.apply(
+        lambda row: find_product_name_method(row, mapping_keywords), axis=1
+    )
+
+    # Exemple de ce qui pourra être converti en numérique : "1 234,56" → 1234.56; "100" → 100.0,;"abc" → NaN
     dataframe["quantity"]  = pd.to_numeric(dataframe["quantity"],  errors="coerce").fillna(0) # coerce = NaN pour les valeurs non convertibles
     dataframe["amount_ht"] = pd.to_numeric(dataframe["amount_ht"], errors="coerce").fillna(0)
 
-    if "brand" in dataframe.columns:
-        dataframe["brand"] = dataframe["brand"].map(
-            lambda brand: BRAND_CORRECTION.get(brand, brand) if pd.notna(brand) else brand
-        )
-
-    # Normaliser product_code, description et data_source à "" pour les NaN (clé de join cohérente)
+    # product_code peut être lu comme int par pandas (ex. 00123 → 123), description/data_source
+    # peuvent contenir des NaN (NaN considéré comme float) -> fillna + astype(str) + replace garantit des str propres en base
     for column in ("product_code", "description", "data_source"):
-        if column in dataframe.columns:
-            dataframe[column] = dataframe[column].fillna("").astype(str).replace("nan", "")
-        else:
-            dataframe[column] = ""
+        dataframe[column] = dataframe[column].fillna("").astype(str).replace("nan", "")
 
     # ── Étape 2 : Alimentation des tables de référence ───────────────────────
     _progression_bar(10, "Mise à jour des tables de référence…")
 
     with get_connection() as connection:
         get_or_create_many(param_connection=connection, param_table="distributor", param_column_name="distributor_name", param_values=dataframe["distributor"])
-        if "data_source" in dataframe.columns:
-            get_or_create_many(param_connection=connection, param_table="data_source", param_column_name="data_source_name", param_values=dataframe["data_source"])
-        if "industrial" in dataframe.columns:
-            get_or_create_many(param_connection=connection, param_table="industrial", param_column_name="industrial_name", param_values=dataframe["industrial"])
-        if "brand" in dataframe.columns:
-            get_or_create_many(param_connection=connection, param_table="brand", param_column_name="brand_name", param_values=dataframe["brand"])
-        if "unit" in dataframe.columns:
-            get_or_create_many(param_connection=connection, param_table="unit", param_column_name="unit_name", param_values=dataframe["unit"])
-        if is_raw_format:
-            # Toutes les catégories du mapping doivent exister avant l'insertion des produits
-            get_or_create_many(param_connection=connection, param_table="category", param_column_name="category_name", param_values=mapping_keywords["categories"])
+        get_or_create_many(param_connection=connection, param_table="data_source", param_column_name="data_source_name", param_values=dataframe["data_source"])
+        get_or_create_many(param_connection=connection, param_table="industrial", param_column_name="industrial_name", param_values=dataframe["industrial"])
+        get_or_create_many(param_connection=connection, param_table="brand", param_column_name="brand_name", param_values=dataframe["brand"])
+        get_or_create_many(param_connection=connection, param_table="unit", param_column_name="unit_name", param_values=dataframe["unit"])
+        # Toutes les catégories du mapping doivent exister avant l'insertion des produits
+        get_or_create_many(param_connection=connection, param_table="category", param_column_name="category_name", param_values=mapping_keywords["categories"])
         get_or_create(param_connection=connection, param_table="category", param_column_name="category_name", param_value="Non catégorisé")
 
         connection.commit()
@@ -344,6 +318,7 @@ def import_transactions(
                 product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name as data_source
                 FROM product
                 JOIN data_source AS data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
+                ORDER BY product.id_product
             """),
             connection
         )
@@ -361,149 +336,156 @@ def import_transactions(
             subset=["fk_id_brand", "fk_id_category"], keep="first"
         )
 
-    # ── Étape 3b : Insertion des nouveaux produits (format brut uniquement) ──
-    if is_raw_format:
-        _progression_bar(32, "Insertion des nouveaux produits…")
+    # ── Étape 3b : Insertion et mise à jour des produits ─────────────────────
+    _progression_bar(32, "Insertion des nouveaux produits…")
 
+    with get_connection() as connection:
+        database_brand_reference      = pd.read_sql(text("SELECT id_brand, brand_name FROM brand"),                   connection)
+        database_category_reference   = pd.read_sql(text("SELECT id_category, category_name FROM category"),          connection)
+        database_unit_reference       = pd.read_sql(text("SELECT id_unit, unit_name FROM unit"),                      connection)
+        database_datasource_reference = pd.read_sql(text("SELECT id_data_source, data_source_name FROM data_source"), connection)
+
+    # Dictionnaires de correspondance {nom: id} pour les FK
+    brand_id_map      = dict(zip(database_brand_reference["brand_name"],            database_brand_reference["id_brand"].astype(int)))
+    category_id_map   = dict(zip(database_category_reference["category_name"],      database_category_reference["id_category"].astype(int)))
+    unit_id_map       = dict(zip(database_unit_reference["unit_name"],              database_unit_reference["id_unit"].astype(int)))
+    datasource_id_map = dict(zip(database_datasource_reference["data_source_name"], database_datasource_reference["id_data_source"].astype(int)))
+
+    # product_name → category_name depuis le mapping (fruit du keyword matching)
+    product_name_to_category: dict = {
+        str(mapping_row["product_name"]): str(mapping_row["categories"])
+        for _, mapping_row in mapping_keywords.iterrows()
+        if pd.notna(mapping_row.get("product_name")) and pd.notna(mapping_row.get("categories"))
+    }
+
+    # Clé d'existence en base : (product_code, description, data_source)
+    existing_keys: set = set(zip(
+        database_product["product_code"],
+        database_product["description"],
+        database_product["data_source"],
+    ))
+
+    # Une ligne par clé unique — préférer celles avec product_name renseigné
+    # les product_name à NaN sont à la fin du dataframe
+    unique_products_dataframe = (
+        dataframe
+        .sort_values("product_name", na_position="last")
+        .drop_duplicates(subset=["product_code", "description", "data_source"], keep="first")
+    )
+
+    new_products: list = []
+    for _, product_row in unique_products_dataframe.iterrows():
+        product_code = str(product_row.get("product_code", ""))
+        description = str(product_row.get("description",  ""))
+        data_source = str(product_row.get("data_source",  ""))
+        key = (product_code, description, data_source)
+
+        # Si le produit existe déjà en base, on ne l'insère pas
+        if key in existing_keys:
+            continue
+
+        # On récupère les noms de marque, catégorie, unité et source de données pour résoudre les FK
+        product_name = product_row.get("product_name") if pd.notna(product_row.get("product_name")) else None
+        brand_name = str(product_row["brand"]) if pd.notna(product_row.get("brand")) else None
+        unit_name = str(product_row["unit"]) if pd.notna(product_row.get("unit")) else None
+        datasource_name = str(product_row["data_source"]) if pd.notna(product_row.get("data_source")) else None
+
+        id_brand = brand_id_map.get(brand_name) if brand_name else None
+        id_unit = unit_id_map.get(unit_name) if unit_name else None
+        id_datasource = datasource_id_map.get(datasource_name) if datasource_name else None
+
+        # Catégorie depuis le keyword matching → "Non catégorisé" si non résolu
+        category_name = product_name_to_category.get(product_name) if product_name else None
+        id_category = category_id_map.get(category_name) if category_name else category_id_map.get("Non catégorisé")
+
+        # ⚠️ ATTENTION : si une FK n'a pas pu être résolue (brand/catégorie/unit/data_source introuvable)
+        # le produit est ignoré silencieusement
+        # Il ne sera jamais inséré en base → les transactions liées à ce produit seront également
+        # ignorées (skippées dans la boucle d'insertion des transactions) et n'apparaîtront
+        # pas du tout dans la table transaction, voir quoi faire si on veut logguer les produits ignorés
+        if not all([id_brand, id_category, id_unit, id_datasource]):
+            continue
+
+        new_products.append({
+            "fk_id_brand":       id_brand,
+            "fk_id_category":    id_category,
+            "fk_id_unit":        id_unit,
+            "fk_id_data_source": id_datasource,
+            "product_name":      product_name,
+            "product_code":      product_code or None,
+            "description":       description  or None,
+        })
+
+    if new_products:
         with get_connection() as connection:
-            database_brand_reference      = pd.read_sql(text("SELECT id_brand, brand_name FROM brand"),                   connection)
-            database_category_reference   = pd.read_sql(text("SELECT id_category, category_name FROM category"),          connection)
-            database_unit_reference       = pd.read_sql(text("SELECT id_unit, unit_name FROM unit"),                      connection)
-            database_datasource_reference = pd.read_sql(text("SELECT id_data_source, data_source_name FROM data_source"), connection)
+            for value in new_products:
+                connection.execute(
+                    text("""
+                        INSERT INTO product
+                            (fk_id_brand, fk_id_category, fk_id_unit, fk_id_data_source,
+                            product_name, product_code, description)
+                        VALUES
+                            (:fk_id_brand, :fk_id_category, :fk_id_unit, :fk_id_data_source,
+                            :product_name, :product_code, :description)
+                    """),
+                    value
+                )
 
-        # Dictionnaires de correspondance {nom: id} pour les FK
-        brand_id_map      = dict(zip(database_brand_reference["brand_name"],            database_brand_reference["id_brand"].astype(int)))
-        category_id_map   = dict(zip(database_category_reference["category_name"],      database_category_reference["id_category"].astype(int)))
-        unit_id_map       = dict(zip(database_unit_reference["unit_name"],              database_unit_reference["id_unit"].astype(int)))
-        datasource_id_map = dict(zip(database_datasource_reference["data_source_name"], database_datasource_reference["id_data_source"].astype(int)))
+            connection.commit()
 
-        # product_name → category_name depuis le mapping (fruit du keyword matching)
-        product_name_to_category: dict = {
-            str(mapping_row["product_name"]): str(mapping_row["categories"])
-            for _, mapping_row in mapping_keywords.iterrows()
-            if pd.notna(mapping_row.get("product_name")) and pd.notna(mapping_row.get("categories"))
-        }
+    # Mise à jour des produits existants : product_name et fk_id_category synchronisés
+    # avec le mapping courant, pour tous les produits que le keyword matching résout.
+    products_to_update = (
+        unique_products_dataframe[unique_products_dataframe["product_name"].notna()]
+        [["product_code", "description", "data_source", "product_name"]]
+        .drop_duplicates(subset=["product_code", "description", "data_source"])
+    )
 
-        # Clé d'existence en base : (product_code, description, data_source)
-        existing_keys: set = set(zip(
-            database_product["product_code"],
-            database_product["description"],
-            database_product["data_source"],
-        ))
+    if not products_to_update.empty:
+        with get_connection() as connection:
+            for _, update_row in products_to_update.iterrows():
+                product_name  = update_row["product_name"]
+                category_name = product_name_to_category.get(product_name)
+                id_category   = category_id_map.get(category_name) if category_name else category_id_map.get("Non catégorisé")
 
-        # Une ligne par clé unique — préférer celles avec product_name renseigné
-        unique_products_dataframe = (
-            dataframe
-            .sort_values("product_name", na_position="last")
-            .drop_duplicates(subset=["product_code", "description", "data_source"], keep="first")
+                connection.execute(
+                    text("""
+                        UPDATE product
+                        SET product_name   = :product_name,
+                            fk_id_category = :fk_id_category
+                        WHERE product_code = :product_code
+                            AND description  = :description
+                            AND fk_id_data_source = (
+                                SELECT id_data_source FROM data_source
+                                WHERE data_source_name = :data_source
+                            )
+                    """),
+                    {
+                        "product_name":   product_name,
+                        "fk_id_category": id_category,
+                        "product_code":   update_row["product_code"],
+                        "description":    update_row["description"],
+                        "data_source":    update_row["data_source"],
+                    },
+                )
+
+            connection.commit()
+
+    # Recharger le catalogue pour que l'étape 4 trouve les produits nouvellement insérés
+    with get_connection() as connection:
+        database_product = pd.read_sql(
+            text("""
+                SELECT product.id_product, product.product_name, product.product_code, product.description,
+                    product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name AS data_source
+                FROM product
+                JOIN data_source data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
+                ORDER BY product.id_product
+            """),
+            connection
         )
 
-        new_products: list = []
-        seen_keys:    set  = set()
-
-        for _, product_row in unique_products_dataframe.iterrows():
-            product_code = str(product_row.get("product_code", ""))
-            description = str(product_row.get("description",  ""))
-            data_source = str(product_row.get("data_source",  ""))
-            key = (product_code, description, data_source)
-
-            # existing_keys = déjà présent en base
-            # seen_keys     = déjà rencontré dans le fichier importé (évite les doublons dans le même fichier)
-            if key in existing_keys or key in seen_keys:
-                continue
-
-            product_name = product_row.get("product_name") if pd.notna(product_row.get("product_name")) else None
-            brand_name = str(product_row["brand"]) if pd.notna(product_row.get("brand")) else None
-            unit_name = str(product_row["unit"]) if pd.notna(product_row.get("unit")) else None
-            datasource_name = str(product_row["data_source"]) if pd.notna(product_row.get("data_source")) else None
-
-            id_brand = brand_id_map.get(brand_name) if brand_name else None
-            id_unit = unit_id_map.get(unit_name) if unit_name else None
-            id_datasource = datasource_id_map.get(datasource_name) if datasource_name else None
-
-            # Catégorie depuis le keyword matching → "Non catégorisé" si non résolu
-            category_name = product_name_to_category.get(product_name) if product_name else None
-            id_category = category_id_map.get(category_name) if category_name else category_id_map.get("Non catégorisé")
-
-            if not all([id_brand, id_category, id_unit, id_datasource]):
-                continue
-
-            new_products.append({
-                "fk_id_brand":       id_brand,
-                "fk_id_category":    id_category,
-                "fk_id_unit":        id_unit,
-                "fk_id_data_source": id_datasource,
-                "product_name":      product_name,
-                "product_code":      product_code or None,
-                "description":       description  or None,
-            })
-            seen_keys.add(key)
-
-        if new_products:
-            with get_connection() as connection:
-                for value in new_products:
-                    connection.execute(
-                        text("""
-                            INSERT INTO product
-                                (fk_id_brand, fk_id_category, fk_id_unit, fk_id_data_source,
-                                product_name, product_code, description)
-                            VALUES
-                                (:fk_id_brand, :fk_id_category, :fk_id_unit, :fk_id_data_source,
-                                :product_name, :product_code, :description)
-                        """),
-                        value
-                    )
-
-                connection.commit()
-
-        # Mise à jour des produits existants dont product_name est encore NULL
-        # (ciblée par product_code + description pour ne pas écraser une valeur existante)
-        products_to_update = unique_products_dataframe[
-            unique_products_dataframe["product_name"].notna()
-        ]
-
-        products_to_update = products_to_update[
-            ["product_code", "description", "product_name"]
-        ]
-
-        products_to_update = products_to_update.drop_duplicates(
-            subset=["product_code", "description"]
-        )
-
-        if not products_to_update.empty:
-            with get_connection() as connection:
-                for _, update_row in products_to_update.iterrows():
-                    connection.execute(
-                        text("""
-                            UPDATE product
-                            SET    product_name = :product_name
-                            WHERE  product_code = :product_code
-                                AND  description  = :description
-                                AND  product_name IS NULL
-                        """),
-                        {
-                            "product_name": update_row["product_name"],
-                            "product_code": update_row["product_code"],
-                            "description":  update_row["description"],
-                        },
-                    )
-
-                connection.commit()
-
-        # Recharger le catalogue pour que l'étape 4 trouve les produits nouvellement insérés
-        with get_connection() as connection:
-            database_product = pd.read_sql(
-                text("""
-                    SELECT product.id_product, product.product_name, product.product_code, product.description,
-                        product.fk_id_brand, product.fk_id_category, data_source_table.data_source_name AS data_source
-                    FROM product
-                    JOIN data_source data_source_table ON data_source_table.id_data_source = product.fk_id_data_source
-                """),
-                connection
-            )
-
-            for column in ("product_code", "description", "data_source"):
-                database_product[column] = database_product[column].fillna("").astype(str).replace("nan", "")
+        for column in ("product_code", "description", "data_source"):
+            database_product[column] = database_product[column].fillna("").astype(str).replace("nan", "")
 
     # ── Étape 4 : Résolution des clés étrangères ─────────────────────────────
     _progression_bar(40, "Résolution des clés étrangères…")
@@ -532,26 +514,21 @@ def import_transactions(
         how="left",
     )
 
+    # Remplacer les 0 par NaN pour éviter la division par zéro (Erreur en Python)
     safe_quantity = dataframe["quantity"].replace(0, float("nan"))
     dataframe["unit_price"] = (dataframe["amount_ht"] / safe_quantity).round(2).fillna(0.0)
 
     # ── Étape 5 : Insertion des transactions ─────────────────────────────────
     _progression_bar(55, "Insertion des transactions…")
 
-    # Vérifie l'existence avant d'insérer pour éviter les doublons si le script
-    # est relancé sur le même fichier. La clé d'unicité est :
-    # (fk_id_product, fk_id_distributor, quantity, total_price)
-    select_transaction_sql = text("""
-        SELECT
-            id_transaction
-        FROM transaction
-        WHERE
-            fk_id_product         = :fk_id_product
-            AND fk_id_distributor = :fk_id_distributor
-            AND quantity          = :quantity
-            AND total_price       = :total_price
-        LIMIT 1
-    """)
+    # On vide la table avant chaque import : la table transaction est entièrement
+    # dérivée des fichiers source + mapping et peut être reconstruite à tout moment.
+    # Cela évite les doublons quand le mapping change (fk_id_product reclassé).
+    with get_connection() as connection:
+        connection.execute(text("SET FOREIGN_KEY_CHECKS = 0")) # Désactiver les contraintes FK pour pouvoir vider la table
+        connection.execute(text("TRUNCATE TABLE transaction"))
+        connection.execute(text("SET FOREIGN_KEY_CHECKS = 1")) # Réactiver les contraintes FK après le vidage de la table
+        connection.commit()
 
     insert_transaction_sql = text("""
         INSERT INTO transaction
@@ -563,59 +540,47 @@ def import_transactions(
     """)
 
     inserted      = 0
-    skipped       = 0
     null_fk_count = 0
     total         = len(dataframe)
 
     with get_connection() as connection:
         for index_dataframe, (_, row) in enumerate(dataframe.iterrows()):
-            if (pd.isna(row.get("id_product")) or pd.isna(row.get("id_agreement")) or pd.isna(row.get("id_distributor"))):
-                null_fk_count += 1
-
-            # Paramètres partagés entre le SELECT et l'INSERT
             fk_id_product     = int(row["id_product"])     if pd.notna(row.get("id_product"))     else None
             fk_id_distributor = int(row["id_distributor"]) if pd.notna(row.get("id_distributor")) else None
+            fk_id_agreement   = int(row["id_agreement"])   if pd.notna(row.get("id_agreement"))   else None
+            unit_price        = float(row["unit_price"])    if pd.notna(row.get("unit_price"))     else 0.0
             quantity          = int(row["quantity"])
             total_price       = float(row["amount_ht"])
 
-            # Vérifie si la transaction existe déjà en base avant d'insérer
-            existing = None
-            if fk_id_product and fk_id_distributor:
-                existing = connection.execute(select_transaction_sql, {
-                    "fk_id_product":     fk_id_product,
-                    "fk_id_distributor": fk_id_distributor,
-                    "quantity":          quantity,
-                    "total_price":       total_price,
-                }).fetchone()
-
-            if existing:
-                skipped += 1
+            # Produit ou distributeur non résolu : impossible d'insérer une transaction cohérente
+            if not fk_id_product or not fk_id_distributor:
+                null_fk_count += 1
                 continue
 
             connection.execute(
                 insert_transaction_sql,
                 {
                     "fk_id_product":     fk_id_product,
-                    "fk_id_agreement":   int(row["id_agreement"])   if pd.notna(row.get("id_agreement"))   else None,
+                    "fk_id_agreement":   fk_id_agreement,
                     "fk_id_distributor": fk_id_distributor,
                     "quantity":          quantity,
-                    "unit_price":        float(row["unit_price"])   if pd.notna(row.get("unit_price"))     else 0.0,
+                    "unit_price":        unit_price,
                     "total_price":       total_price,
                     "transaction_date":  transaction_date,
                 },
             )
 
             inserted += 1
+            # Mise à jour de la barre de progression toutes les 50 transactions pour éviter un trop grand nombre d'appels
             if index_dataframe % 50 == 0:
                 _progression_bar(55 + int(38 * index_dataframe / total), f"Insertion {index_dataframe + 1}/{total}…")
 
         connection.commit()
 
-    _progression_bar(100, f"{inserted} transactions insérées, {skipped} ignorées (doublons), {null_fk_count} avec FK manquants.")
+    _progression_bar(100, f"{inserted} transactions insérées")
 
     return {
         "inserted": inserted,
-        "skipped":  skipped,
         "null_fk": null_fk_count,
         "total": total,
         "transaction_date_used": transaction_date.isoformat()
@@ -641,8 +606,12 @@ def import_conversions(param_file_path: str, param_progress_callback=None) -> di
     # -----
 
     def _progression_bar(param_percentage: int, param_message: str) -> None:
+        """ Met à jour la barre de progression """
+
         if param_progress_callback:
             param_progress_callback(param_percentage, param_message)
+
+        return None
 
     # -----
 
@@ -673,21 +642,18 @@ def import_conversions(param_file_path: str, param_progress_callback=None) -> di
         connection.execute(text("DELETE FROM product_conversion"))
         connection.commit()
 
-    # ON DUPLICATE KEY UPDATE écrase agreement_unit et conversion_factor avec les valeurs du fichier
-    upsert_sql = text("""
+    insert_sql = text("""
         INSERT INTO product_conversion
             (distributor_name, product_code, transaction_unit, agreement_unit, conversion_factor)
         VALUES
             (:distributor_name, :product_code, :transaction_unit, :agreement_unit, :conversion_factor)
-        ON DUPLICATE KEY UPDATE
-            agreement_unit    = VALUES(agreement_unit),
-            conversion_factor = VALUES(conversion_factor)
     """)
 
     processed = 0
     with get_connection() as connection:
-        for index, (_, row) in enumerate(dataframe.iterrows()):
-            connection.execute(upsert_sql, {
+        # index_counter est utilisé pour la barre de progression, _ est l'index de la ligne dans le dataframe
+        for index_counter, (_, row) in enumerate(dataframe.iterrows()):
+            connection.execute(insert_sql, {
                 "distributor_name": str(row["distributor_name"]),
                 "product_code":     str(row["product_code"]),
                 "transaction_unit": str(row["transaction_unit"]),
@@ -695,8 +661,8 @@ def import_conversions(param_file_path: str, param_progress_callback=None) -> di
                 "conversion_factor": float(row["conversion_factor"]),
             })
             processed += 1
-            if index % 50 == 0:
-                _progression_bar(20 + int(75 * index / max(total, 1)), f"Traitement {index + 1}/{total}…")
+            if index_counter % 50 == 0:
+                _progression_bar(20 + int(75 * index_counter / max(total, 1)), f"Traitement {index_counter + 1}/{total}…")
 
         connection.commit()
 
@@ -740,7 +706,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     if missing:
         raise ValueError(f"Colonnes manquantes dans le fichier mapping : {missing}")
 
-    # Normalisation des marques (correction des fautes de frappe, accents, etc.)
+    # Normalisation de Hellmanns → Hellmann's
     mapping["brand"] = mapping["brand"].map(
         lambda brand: BRAND_CORRECTION.get(brand, brand) if pd.notna(brand) else brand
     )
@@ -894,7 +860,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
 # -----
 
-def resolve_agreements_method(param_progress_callback=None) -> dict:
+def resolve_agreements_method(param_progress_callback=None) -> None:
     """
     Rerésout fk_id_agreement sur toutes les transactions dont la FK est NULL.
 
@@ -928,21 +894,10 @@ def resolve_agreements_method(param_progress_callback=None) -> dict:
             AND transaction.fk_id_product IS NOT NULL
     """)
 
-    count_sql = text("""
-        SELECT
-            SUM(CASE WHEN fk_id_agreement IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
-            SUM(CASE WHEN fk_id_agreement IS NULL THEN 1 ELSE 0 END) AS unresolved
-        FROM transaction
-    """)
-
     with get_connection() as connection:
         connection.execute(resolve_sql)
         connection.commit()
-        result = connection.execute(count_sql).fetchone()
 
     _progression_bar(100, "Rerésolution terminée.")
 
-    return {
-        "resolved":   int(result[0] or 0),
-        "unresolved": int(result[1] or 0),
-    }
+    return None
