@@ -150,8 +150,8 @@ class GuiMainWindowClass(QMainWindow):
         # Ligne de 4 cartes KPI côte à côte
         kpi_row = QHBoxLayout()
         self.kpi_revenus    = self.create_kpi_card_method("Revenus calculés",   "—")
-        self.kpi_accords    = self.create_kpi_card_method("Accords actifs",     "0")
-        self.kpi_produits   = self.create_kpi_card_method("Produits mappés",    "0")
+        self.kpi_accords    = self.create_kpi_card_method("Accords",     "0")
+        self.kpi_produits   = self.create_kpi_card_method("Produits",    "0")
         self.kpi_product_to_be_verified = self.create_kpi_card_method("Transactions sans produit", "0")
         self.kpi_agreement_to_be_verified = self.create_kpi_card_method("Transactions sans accord", "0")
         self.kpi_distributor_to_be_verified = self.create_kpi_card_method("Transactions sans distributeur", "0")
