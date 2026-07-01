@@ -462,7 +462,7 @@ Métro | KNORR001 | BOÎTE | UVC | 12
 **Étapes :**
 1. Lecture et validation du fichier (les colonnes manquantes lèvent une erreur claire).
 2. La table `product_conversion` est entièrement vidée (`DELETE FROM product_conversion`).
-3. Chaque ligne est insérée avec `ON DUPLICATE KEY UPDATE` : si la clé existe déjà (même distributeur + code produit + unité transaction), les valeurs sont écrasées.
+3. Chaque ligne du fichier est ensuite insérée avec un simple `INSERT` (pas d'`ON DUPLICATE KEY UPDATE` — inutile puisque la table vient d'être vidée à l'étape précédente).
 
 ---
 
@@ -487,7 +487,7 @@ Hellmann's | Mayonnaise  | 0.10                     |
 
 1. **Lecture et détection des colonnes `palier_*`** : toutes les colonnes dont le nom commence par `palier_` sont collectées.
 2. **Détection du `palier_group`** : pour chaque ligne, on parse les colonnes `palier_*` pour extraire le nom du groupe (ex : `"X"` dans `palier_X_25000-35000_uvc`).
-3. **Alimentation des tables de référence** : les marques, catégories, et l'industriel `UNILEVER FOODSOLUTIONS` sont créés si absents.
+3. **Alimentation des tables de référence** : les marques, catégories, l'unité `UVC` et l'industriel `UNILEVER FOODSOLUTIONS` sont créés si absents.
 4. **Suppression de tous les accords existants** :
    ```python
    connection.execute(text("DELETE FROM agreement"))
@@ -504,7 +504,7 @@ Hellmann's | Mayonnaise  | 0.10                     |
 ### 3.8 `resolve_agreements_method()`
 
 ```python
-def resolve_agreements_method(param_progress_callback=None) -> dict:
+def resolve_agreements_method(param_progress_callback=None) -> None:
 ```
 
 **Ce que ça fait :** Rerésout la clé `fk_id_agreement` sur toutes les transactions qui n'ont pas d'accord associé (`NULL`).
@@ -656,12 +656,7 @@ for tier in tiers:
 - `max_volume is None` représente le palier ouvert ("40 000 et plus").
 - Si aucun palier ne s'applique (volume trop faible), les colonnes restent à `NULL`.
 
-**Calcul du revenu :**
-```python
-revenue = volume_accord * tier_price
-# volume_accord = volume de CE distributeur pour CET accord
-# tier_price    = prix/UVC du palier atteint (commun à tous les distributeurs du groupe)
-```
+Le palier atteint (`applicable_tier`) et son `tier_price` (prix/unité accord) sont désormais connus pour ce couple (distributeur × accord). Le revenu exact n'est **pas** calculé ici en Python — il est calculé directement en base, transaction par transaction, à l'étape suivante.
 
 ---
 
@@ -679,8 +674,22 @@ WHERE transaction.fk_id_agreement = :fk_id_agreement
   AND transaction.fk_id_distributor = :fk_id_distributor
 ```
 
-- `agreement_total_price` est calculé directement en SQL pour chaque transaction individuelle (pas seulement par agrégat distributeur × accord).
+- `agreement_total_price` est calculé directement en SQL pour chaque transaction individuelle (pas seulement par agrégat distributeur × accord) — c'est cette valeur, arrondie à 2 décimales par transaction (`DECIMAL(10,2)`), qui fait foi.
 - Le résumé final est calculé depuis la base en sommant `agreement_total_price` par `palier_group`.
+
+**Relecture du revenu réel pour le detail affiché :**
+
+```python
+dataframe_actual_revenue = pd.read_sql(text("""
+    SELECT fk_id_agreement, fk_id_distributor, SUM(agreement_total_price) AS revenue
+    FROM transaction
+    WHERE agreement_total_price IS NOT NULL
+    GROUP BY fk_id_agreement, fk_id_distributor
+"""), connection)
+```
+
+- Une fois l'`UPDATE` exécuté, le revenu affiché dans `results[i]["detail"]` (pour les accords ayant atteint un palier) n'est pas recalculé en Python (`volume_accord x tier_price`) — il est **relu depuis la base**, en sommant les `agreement_total_price` réellement stockés pour ce couple `(fk_id_agreement, fk_id_distributor)`.
+- Cela garantit que le détail affiché à l'écran/Excel correspond **exactement, au centime près**, au total utilisé dans `summary["total_revenue"]` — les deux proviennent de la même source (`agreement_total_price` en base), au lieu d'un calcul agrégé fait séparément qui pourrait diverger de quelques centimes à cause des arrondis par transaction.
 
 **Valeur retournée :**
 ```python

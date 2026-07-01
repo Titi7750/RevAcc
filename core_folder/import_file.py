@@ -868,8 +868,6 @@ def resolve_agreements_method(param_progress_callback=None) -> None:
     À appeler après import_agreements() pour que les transactions existantes
     retrouvent un accord valide. La résolution se fait via (fk_id_brand, fk_id_category)
     du produit associé à chaque transaction.
-
-    Retourne un résumé : transactions mises à jour, transactions toujours sans accord.
     """
 
     # -----
