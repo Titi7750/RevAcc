@@ -28,7 +28,7 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
     2. Sommer le volume de tous les accords du même palier_group, tous distributeurs confondus
         → Volume total du groupe (commun à tous les distributeurs)
     3. Déterminer le palier applicable depuis le volume total du groupe
-    4. Revenu par accord = volume_accord x prix_palier (€/UVC)
+    4. Revenu par accord = volume_accord x prix_palier (€/unité accord)
     5. Mettre à jour fk_id_agreement_tier, agreement_unit_price, agreement_total_price dans la table transaction
 
     Si un distributeur n'atteint aucun seuil pour un groupe, les colonnes agreement
@@ -39,19 +39,25 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
 
     # -----
 
+    # -------------------------------------------------------------
+    # Mise à jour de la barre de progression
+    # -------------------------------------------------------------
+
     def _progression_bar(param_percentage: int, param_message: str):
         """ Met à jour la barre de progression """
 
         if param_progress_cb:
             param_progress_cb(param_percentage, param_message)
 
-    # -----
+    # -------------------------------------------------------------
+    # Chargement des données depuis la base de données
+    # -------------------------------------------------------------
 
-    # ── Étape 1 : Chargement des données ─────────────────────────────────────
     _progression_bar(0, "Chargement des transactions…")
 
     with get_connection() as connection:
-        # Charge le volume par (distributeur x accord) depuis la base
+
+        # Calcule le volume par couple (distributeur x accord)
         # Le facteur de conversion provient de product_conversion (renseigné par le client)
         # COALESCE(conversion_factor, 1) sécurise le cas où la correspondance est absente
         # Le GROUP BY agrège toutes les transactions d'un même distributeur pour un
@@ -79,15 +85,15 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         )
 
         # Sortie anticipée si aucune transaction n'a d'accord résolu en base
-        # Cas possible si le Bouton (Importer accords) n'a jamais été lancé
+        # Cas possible si les boutons d'importation n'ont jamais été lancés
         if dataframe_transaction.empty:
             return [], {"total_revenue": 0.0, "agreements": 0, "transactions": 0}
 
         _progression_bar(20, "Chargement des accords…")
 
-        # Charge les informations descriptives de chaque accord (fournisseur, marque,
-        # catégorie, palier_group). Utilisé pour enrichir les résultats affichés
-        # et pour construire la colonne palier_group qui sert à regrouper les UVC
+        # Informations descriptives de chaque accord (fournisseur, marque, catégorie,
+        # palier_group). Utilisées pour enrichir les résultats affichés dans l'interface
+        # et pour construire la colonne palier_group qui sert à regrouper les volumes
         dataframe_agreement_clean = pd.read_sql(
             text("""
                 SELECT
@@ -106,9 +112,10 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
 
         _progression_bar(35, "Chargement des paliers…")
 
-        # Charge tous les paliers de tous les accords. Chaque accord a 3 lignes :
-        # une par tranche de volume (min_volume, max_volume, price). C'est dans cette table
-        # qu'on va chercher le prix applicable une fois le palier déterminé
+        # Tous les paliers de tous les accords. Chaque accord a 3 lignes :
+        # une par tranche de volume (min_volume, max_volume, price)
+        # C'est dans cette table qu'on cherche le prix applicable
+        # une fois le palier déterminé
         dataframe_agreement_tiers = pd.read_sql(
             text("""
                 SELECT id_agreement_tier, fk_id_agreement, min_volume, max_volume, price
@@ -118,7 +125,7 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
             connection
         )
 
-        # Charge le référentiel distributeurs pour résoudre les noms à afficher
+        # Référentiel distributeurs pour résoudre les noms à afficher
         # dans les résultats (id_distributor → distributor_name)
         dataframe_distributors = pd.read_sql(
             text("SELECT id_distributor, distributor_name FROM distributor"),
@@ -128,16 +135,19 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         _progression_bar(45, "Comptage des transactions…")
 
         # Comptage simple pour alimenter le résumé final (summary["transactions"])
-        # Ne filtre que les transactions avec accord résolu — les 13 non matchés sont exclus
+        # Ne filtre que les transactions avec un accord
         transaction_count = connection.execute(
             text("SELECT COUNT(*) FROM transaction WHERE fk_id_agreement IS NOT NULL")
-        ).scalar() or 0
+        ).scalar() or 0 # scalar() permet de récupérer la valeur de la requête quand une seule ligne au total est retournée
 
-    # ── Étape 2 : Enrichissement et agrégation ────────────────────────────────
+    # -------------------------------------------------------------
+    # Fusion des tableaux de données
+    # -------------------------------------------------------------
+
     _progression_bar(50, "Calcul des revenus par groupe de palier…")
 
-    # Jointure pour ajouter les informations descriptives de l'accord (marque, catégorie,
-    # palier_group...) à chaque ligne (distributeur x accord)
+    # Ajoute les informations descriptives de l'accord (marque, catégorie, palier_group…)
+    # à chaque ligne (distributeur x accord)
     dataframe = dataframe_transaction.merge(
         dataframe_agreement_clean,
         left_on="fk_id_agreement",
@@ -145,7 +155,7 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         how="left"
     )
 
-    # Jointure pour ajouter le nom du distributeur
+    # Ajoute le nom du distributeur à chaque ligne
     dataframe = dataframe.merge(
         dataframe_distributors,
         left_on="fk_id_distributor",
@@ -153,13 +163,13 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         how="left"
     )
 
-    # Volume total par palier_group — global tous distributeurs confondus
+    # Calcule le volume total par palier_group, tous distributeurs confondus
     # C'est ce total qui détermine le palier atteint; il s'applique ensuite
     # à chaque (distributeur x accord) pour calculer son propre revenu
     group_totals = (
         dataframe[dataframe["palier_group"].notna()] # Ignore les accords sans palier_group
-        .groupby("palier_group")["volume"] # Sommer tout le volume du groupe, tous distributeurs confondus
-        .sum() # Sommer le volume pour chaque groupe
+        .groupby("palier_group")["volume"] # Regroupe les lignes par palier_group et cible la colonne volume
+        .sum() # Somme le volume de chaque groupe, tous distributeurs confondus
         .rename("group_volume") # Renommer la colonne
         .reset_index() # Remettre les colonnes de groupement comme colonnes normales
     )
@@ -170,18 +180,24 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         how="left"
     )
 
-    # Construit un dictionnaire d'accès rapide aux paliers : {id_agreement: [liste de paliers]}
-    # Évite de refiltrer le DataFrame à chaque itération de la boucle principale —
-    # un simple .get(agreement_id) - ligne 226 suffit pour récupérer les 3 paliers d'un accord
+    # -------------------------------------------------------------
+    # Construction du dictionnaire de paliers pour accès rapide
+    # -------------------------------------------------------------
+
+    # Regroupe les paliers par accord dans un dictionnaire {id_agreement: [liste de paliers]}
+    # Évite de refiltrer le DataFrame à chaque itération de la boucle principale :
+    # un simple .get(agreement_id) suffit pour récupérer les 3 paliers d'un accord
     tiers_by_agreement: dict = {}
     for _, tier_row in dataframe_agreement_tiers.iterrows():
         foreign_key = int(tier_row["fk_id_agreement"])
         tiers_by_agreement.setdefault(foreign_key, []).append(tier_row)
 
-    # ── Étape 3 : Résolution du palier et calcul du revenu ───────────────────
+    # -------------------------------------------------------------
+    # Remise à zéro des calculs précédents
+    # -------------------------------------------------------------
 
-    # Reset préalable : remet à NULL toutes les colonnes agreement_* pour éviter
-    # de conserver des valeurs obsolètes d'un run précédent
+    # Remet à NULL toutes les colonnes agreement_* avant de recalculer,
+    # pour ne pas conserver des valeurs obsolètes d'un run précédent
     with get_connection() as connection:
         connection.execute(text("""
             UPDATE transaction
@@ -192,21 +208,24 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         """))
         connection.commit()
 
+    # -------------------------------------------------------------
+    # Calcul du palier et du revenu applicable par accord
+    # -------------------------------------------------------------
+
     # results : liste des résultats à retourner à l'interface pour affichage
-    # transactions_to_update : liste des mises à jour à appliquer en base (étape 4)
-    results:             list = []
+    # transactions_to_update : liste des mises à jour à appliquer en base (étape suivante)
+    results: list = []
     transactions_to_update: list = []
     total = len(dataframe)
 
     for index, (_, row) in enumerate(dataframe.iterrows()):
         _progression_bar(50 + int(35 * index / max(total, 1)), f"Accord {index + 1}/{total}…")
 
-        # Extraction des valeurs la ligne par ligne
+        # Extraction des valeurs ligne par ligne
         # Les str() et or "N/A" protègent contre les valeurs NULL
-        # comme NaN depuis pandas, ce qui provoquerait des erreurs à l'affichage
         agreement_id   = int(row["fk_id_agreement"])
         distributor_id = int(row["fk_id_distributor"])
-        volume_accord     = int(row["volume"])
+        volume_accord  = int(row["volume"])
         industrial     = str(row.get("industrial_name") or "N/A")
         brand          = str(row.get("brand_name")      or "N/A")
         category       = str(row.get("category_name")   or "N/A")
@@ -214,9 +233,8 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
         palier_group   = str(row.get("palier_group")     or "—")
 
         # group_volume est le volume total du palier_group (tous accords + tous distributeurs confondus)
-        # Si l'accord n'a pas de palier_group (ex : produit hors accord comme Lipton),
-        # on utilise le volume de l'accord seul comme fallback — il n'atteindra jamais
-        # de palier, mais ça évite une erreur et produit un message "Aucun palier applicable"
+        # Si l'accord n'a pas de palier_group, on utilise le volume de l'accord seul comme
+        # fallback — il n'atteindra jamais de palier, mais évite une erreur
         group_volume_raw = row.get("group_volume")
         group_volume     = int(group_volume_raw) if pd.notna(group_volume_raw) else volume_accord
 
@@ -227,44 +245,38 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
             reverse=True
         )
 
-        # On teste d'abord le palier le plus haut : dès qu'on trouve un intervalle
-        # [min_volume, max_volume] qui contient group_volume, c'est le palier applicable
+        # Parcourt les paliers pour trouver l'intervalle [min_volume, max_volume] qui contient group_volume
+        # group_volume >= min_volume → la quantité atteint le seuil bas du palier
+        # max_volume is None         → le palier est ouvert ("40 000 et plus") : pas de borne haute
+        # group_volume <= max_volume → la quantité ne dépasse pas la borne haute
         applicable_tier = None
         for tier in tiers:
             min_volume = int(tier["min_volume"])
             max_volume = int(tier["max_volume"]) if pd.notna(tier["max_volume"]) else None
 
-            # group_volume >= min_volume → la quantité atteint le seuil bas du palier
-            # max_volume is None      → le palier est ouvert ("40 000 et plus") : pas de borne haute
-            # group_volume <= max_volume → la quantité ne dépasse pas la borne haute
             if group_volume >= min_volume and (max_volume is None or group_volume <= max_volume):
                 applicable_tier = tier
                 break
 
-        # Palier trouvé → préparation de la mise à jour en base et construction du détail.
-        # revenue est calculé uniquement pour alimenter la chaîne detail (affichage).
+        # Palier trouvé → préparation de la mise à jour en base; le detail sera
+        # construit plus loin, une fois le revenu réel relu en base
         # Chaque distributeur a son propre volume, mais tous partagent le même palier
-        # (déterminé par le group_volume global, tous distributeurs confondus).
+        # (déterminé par le group_volume global, tous distributeurs confondus)
         if applicable_tier is not None:
             tier_id    = int(applicable_tier["id_agreement_tier"])
             tier_price = float(applicable_tier["price"])
-            min_palier   = int(applicable_tier["min_volume"])
-            max_palier   = (
+            min_palier = int(applicable_tier["min_volume"])
+            max_palier = (
                 f"{int(applicable_tier["max_volume"]):,}"
                 if pd.notna(applicable_tier["max_volume"])
                 else "+∞"
             )
-            revenue  = volume_accord * tier_price
             tier_str = f"{tier_price:.2f} €/unité accord"
-            detail   = (
-                f"{volume_accord:,} unités x {tier_price:.2f} €/UVC "
-                f"= {revenue:,.2f} €  "
-                f"(palier {min_palier:,}-{max_palier} unités, total groupe {group_volume:,}unités)"
-            )
+            # Le revenu exact n'est connu qu'après l'UPDATE en base : le detail
+            # est finalisé plus loin avec le total réellement stocké, pour rester cohérent
+            # au centime près avec le résumé (SUM(agreement_total_price))
+            detail = None
 
-            # Empile les paramètres nécessaires à l'UPDATE de la table transaction.
-            # On stocke l'accord + le distributeur pour cibler exactement les bonnes lignes,
-            # et le tier_id + tier_price pour remplir les 3 colonnes agreement_*.
             transactions_to_update.append({
                 "fk_id_agreement":      agreement_id,
                 "fk_id_distributor":    distributor_id,
@@ -275,28 +287,39 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
             tier_id    = None
             tier_price = 0.0
             tier_str   = "Aucun palier"
-            detail     = f"Aucun palier applicable (total groupe {group_volume:,}unités)"
+            min_palier = None
+            max_palier = None
+            detail     = f"Aucun palier applicable (total groupe {group_volume:,} unités)"
 
-        # Empile le résultat de cette ligne pour l'affichage dans l'interface.
-        # Chaque entrée correspond à un accord pour un distributeur donné.
+        # Construit une ligne de résultat pour cet accord/distributeur : une partie de ces
+        # champs (industrial, brand, category, detail, distributor, total_volume, tier_price)
+        # alimente le log affiché à l'écran et/ou le fichier Excel exporté. D'autres champs
+        # (id_agreement, fk_id_distributor, min_palier, max_palier, group_volume) ne servent
+        # qu'en interne, pour retrouver/reconstruire le detail plus loin
         results.append({
-            "id_agreement": agreement_id,
-            "distributor":  distributor,
-            "industrial":   industrial,
-            "brand":        brand,
-            "category":     category,
-            "palier_group": palier_group,
-            "total_volume":    volume_accord,
-            "group_volume":    group_volume,
-            "tier_price":   tier_str,
-            "detail":       detail,
+            "id_agreement":      agreement_id,
+            "fk_id_distributor": distributor_id,
+            "distributor":       distributor,
+            "industrial":        industrial,
+            "brand":             brand,
+            "category":          category,
+            "palier_group":      palier_group,
+            "total_volume":      volume_accord,
+            "group_volume":      group_volume,
+            "tier_price":        tier_str,
+            "min_palier":        min_palier,
+            "max_palier":        max_palier,
+            "detail":            detail
         })
 
-    # ── Étape 4 : Mise à jour des colonnes agreement dans transaction ─────────
+    # -------------------------------------------------------------
+    # Enregistrement des résultats en base de données
+    # -------------------------------------------------------------
+
     _progression_bar(85, "Mise à jour des transactions…")
 
     if transactions_to_update:
-        # Met à jour en base les 3 colonnes agreement_* ayant atteint un palier
+        # Met à jour les 3 colonnes agreement_* ayant atteint un palier
         # agreement_total_price = agreement_unit_price x volume de la transaction
         # Le facteur de conversion provient de product_conversion
         # COALESCE(conversion_factor, 1) sécurise le cas où la correspondance est absente
@@ -325,11 +348,47 @@ def run_calculation_method(param_progress_cb=None) -> tuple:
 
             connection.commit()
 
+        # Relit le revenu réellement stocké (somme des agreement_total_price arrondis
+        # transaction par transaction en base) pour finaliser le detail de chaque accord
+        # avec le total exact, cohérent au centime près avec le résumé plus bas
+        with get_connection() as connection:
+            dataframe_actual_revenue = pd.read_sql(
+                text("""
+                    SELECT fk_id_agreement, fk_id_distributor, SUM(agreement_total_price) AS revenue
+                    FROM transaction
+                    WHERE agreement_total_price IS NOT NULL
+                    GROUP BY fk_id_agreement, fk_id_distributor
+                """),
+                connection
+            )
+
+        actual_revenue_by_group = {
+            (int(row["fk_id_agreement"]), int(row["fk_id_distributor"])): float(row["revenue"])
+            for _, row in dataframe_actual_revenue.iterrows()
+        }
+
+        for result_item in results:
+            if result_item["detail"] is not None:
+                continue  # "Aucun palier applicable" déjà finalisé plus haut
+
+            agreement_distributor_key = (result_item["id_agreement"], result_item["fk_id_distributor"])
+            actual_revenue = actual_revenue_by_group.get(agreement_distributor_key, 0.0)
+
+            result_item["detail"] = (
+                f"{result_item['total_volume']:,} unités x {result_item['tier_price']} "
+                f"= {actual_revenue:,.2f} € "
+                f"(palier {result_item['min_palier']:,}-{result_item['max_palier']} unités, "
+                f"total groupe {result_item['group_volume']:,} unités)"
+            )
+
     _progression_bar(100, "Calcul terminé.")
 
-    # Totaux par palier_group depuis agreement_total_price en base
-    # total_revenue = somme de tous les groupes
-    # revenue_by_group = détail par groupe pour affichage séparé dans l'interface
+    # -------------------------------------------------------------
+    # Calcul du revenu total par groupe et résumé final
+    # -------------------------------------------------------------
+
+    # Récupère les revenus par palier_group depuis la base de données,
+    # en sommant agreement_total_price sur toutes les transactions concernées
     with get_connection() as connection:
         dataframe_revenue_by_group = pd.read_sql(
             text("""
