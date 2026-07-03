@@ -160,18 +160,19 @@ def find_product_name_method(param_row: pd.Series, param_mapping: pd.DataFrame) 
 
 def parse_palier_column_name_method(param_column_name: str):
     """
-    Retourne (group_key, min_volume, max_volume_inclusive) ou None
-    - palier_X_25000-35000_uvc    → ('X', 25000, 34999)
-    - palier_X_superior-40000_uvc → ('X', 40000, None)
+    Retourne (group_key, min_volume, max_volume_inclusive, unit_name) ou None
+    - palier_X_25000-35000_uvc    → ('X', 25000, 34999, 'UVC')
+    - palier_X_superior-40000_uvc → ('X', 40000, None, 'UVC')
+    - palier_X_100-500_colis      → ('X', 100, 499, 'COLIS')
     """
 
-    match = re.match(r"^palier_(.+)_(\d+)-(\d+)_uvc$", param_column_name)
+    match = re.match(r"^palier_(.+)_(\d+)-(\d+)_(\w+)$", param_column_name)
     if match:
-        return match.group(1), int(match.group(2)), int(match.group(3)) - 1
+        return match.group(1), int(match.group(2)), int(match.group(3)) - 1, match.group(4).upper()
 
-    match = re.match(r"^palier_(.+)_superior-(\d+)_uvc$", param_column_name)
+    match = re.match(r"^palier_(.+)_superior-(\d+)_(\w+)$", param_column_name)
     if match:
-        return match.group(1), int(match.group(2)), None
+        return match.group(1), int(match.group(2)), None, match.group(3).upper()
 
     return None
 
@@ -685,6 +686,11 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     sont insérés depuis le fichier. Les transactions dont fk_id_agreement
     pointait vers un ancien accord passent automatiquement à NULL (ON DELETE SET NULL)
     Appeler resolve_agreements_method() après l'import pour rerésoudre les FK
+
+    L'unité de chaque accord (fk_id_unit) est déduite du suffixe des colonnes
+    palier_* de son palier_group (ex : palier_X_25000-35000_uvc → UVC,
+    palier_X_100-500_colis → COLIS). UVC est utilisée par défaut si l'accord
+    n'a pas de palier_group détecté.
     """
 
     def _progression_bar(param_percentage: int, param_message: str) -> None:
@@ -733,25 +739,31 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
 
     mapping["palier_group"] = mapping.apply(_detect_palier_group, axis=1)
 
+    # Unité de chaque palier_group, déduite du suffixe des colonnes palier_* (ex : _uvc, _colis)
+    # Un même groupe doit être exprimé dans une seule unité : on garde la première rencontrée
+    palier_group_units: dict[str, str] = {}
+    for column in palier_columns:
+        parsed = parse_palier_column_name_method(column)
+        if parsed:
+            group, _, _, unit_name = parsed
+            palier_group_units.setdefault(group, unit_name)
+
     # ── Étape 2 : Alimentation des tables de référence ───────────────────────
     _progression_bar(10, "Mise à jour des tables de référence…")
+
+    # UVC reste l'unité par défaut pour les accords sans palier_group détecté
+    unit_names = set(palier_group_units.values()) | {"UVC"}
 
     with get_connection() as connection:
         get_or_create_many(connection, "brand",      "brand_name",      mapping["brand"])
         get_or_create_many(connection, "category",   "category_name",   mapping["categories"])
-        get_or_create(connection,      "unit",       "unit_name",       "UVC")
-        get_or_create(connection,      "industrial", "industrial_name", INDUSTRIAL_NAME)
+        unit_id_map   = get_or_create_many(connection, "unit", "unit_name", unit_names)
+        id_industrial = get_or_create(connection,      "industrial", "industrial_name", INDUSTRIAL_NAME)
 
         connection.commit()
 
-        database_brand      = pd.read_sql(text("SELECT id_brand, brand_name FROM brand"),                connection)
-        database_category   = pd.read_sql(text("SELECT id_category, category_name FROM category"),       connection)
-        database_industrial = pd.read_sql(text("SELECT id_industrial, industrial_name FROM industrial"), connection)
-        database_unit       = pd.read_sql(text("SELECT id_unit, unit_name FROM unit"),                   connection)
-
-    # Récupération des id_unit et id_industrial pour les FK
-    id_unit_uvc   = int(database_unit.loc[database_unit["unit_name"] == "UVC", "id_unit"].iloc[0])
-    id_industrial = int(database_industrial.loc[database_industrial["industrial_name"] == INDUSTRIAL_NAME, "id_industrial"].iloc[0])
+        database_brand    = pd.read_sql(text("SELECT id_brand, brand_name FROM brand"),          connection)
+        database_category = pd.read_sql(text("SELECT id_category, category_name FROM category"), connection)
 
     # ── Étape 3 : Suppression de tous les accords et paliers existants ───────
     # agreement_tier est supprimé en cascade depuis agreement (ON DELETE CASCADE).
@@ -791,14 +803,17 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
             if pd.isna(work_row.get("id_brand")) or pd.isna(work_row.get("id_category")):
                 continue
 
+            palier_group = work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None
+            unit_name    = palier_group_units.get(palier_group, "UVC")
+
             result = connection.execute(
                 insert_agreement_sql,
                 {
                     "fk_id_brand":      int(work_row["id_brand"]),
                     "fk_id_category":   int(work_row["id_category"]),
                     "fk_id_industrial": id_industrial,
-                    "fk_id_unit":       id_unit_uvc,
-                    "palier_group":     work_row.get("palier_group") if pd.notna(work_row.get("palier_group")) else None,
+                    "fk_id_unit":       unit_id_map[unit_name],
+                    "palier_group":     palier_group,
                 },
             )
             new_agreement_rows.append((work_row, int(result.lastrowid)))
@@ -831,7 +846,7 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
                 if not parsed:
                     continue
 
-                group, min_volume, max_volume = parsed
+                group, min_volume, max_volume, _ = parsed
                 if group != palier_group:
                     continue
 

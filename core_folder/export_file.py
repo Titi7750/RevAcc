@@ -38,7 +38,7 @@ def export_calculation_method(param_file_path: str, param_results: list, param_s
     dataframe_totaux = pd.DataFrame([
         {
             "Accord": agreement_name,
-            "Revenu (€)": revenue,
+            "Revenu (€)": round(revenue, 2),
         }
         for agreement_name, revenue in revenue_by_group.items()
     ])
@@ -46,17 +46,16 @@ def export_calculation_method(param_file_path: str, param_results: list, param_s
     # Ajout d'une ligne pour le total global
     dataframe_totaux.loc[len(dataframe_totaux)] = {
         "Accord": "Total",
-        "Revenu (€)": param_summary.get("total_revenue", 0.0),
+        "Revenu (€)": round(param_summary.get("total_revenue", 0.0), 2),
     }
 
     with get_connection() as connection:
         dataframe_transactions = pd.read_sql(
             text("""
-                SELECT product.product_name, product.description, brand.brand_name,
+                SELECT product.product_code, product.product_name, product.description, brand.brand_name,
                 category.category_name, distributor.distributor_name, industrial.industrial_name,
-                transaction.quantity, transaction.unit_price, transaction.total_price,
-                transaction.transaction_date,
-                transaction.agreement_unit_price,
+                transaction.quantity, transaction.unit_price, transaction.total_price, unit.unit_name,
+                transaction.transaction_date, transaction.agreement_unit_price, product_conversion.agreement_unit,
                 CASE
                     WHEN transaction.fk_id_agreement IS NULL THEN 'Sans accord'
                 ELSE 'OK'
@@ -65,10 +64,15 @@ def export_calculation_method(param_file_path: str, param_results: list, param_s
                 LEFT JOIN product        ON product.id_product               = transaction.fk_id_product
                 LEFT JOIN brand          ON brand.id_brand                   = product.fk_id_brand
                 LEFT JOIN category       ON category.id_category             = product.fk_id_category
+                LEFT JOIN unit           ON unit.id_unit                     = product.fk_id_unit
                 LEFT JOIN distributor    ON distributor.id_distributor       = transaction.fk_id_distributor
                 LEFT JOIN agreement      ON agreement.id_agreement           = transaction.fk_id_agreement
                 LEFT JOIN industrial     ON industrial.id_industrial         = agreement.fk_id_industrial
                 LEFT JOIN agreement_tier ON agreement_tier.id_agreement_tier = transaction.fk_id_agreement_tier
+                LEFT JOIN product_conversion
+                    ON  product_conversion.distributor_name = distributor.distributor_name
+                    AND product_conversion.product_code     = product.product_code
+                    AND product_conversion.transaction_unit = unit.unit_name
                 ORDER BY transaction.id_transaction
             """),
             connection
@@ -82,13 +86,14 @@ def export_calculation_method(param_file_path: str, param_results: list, param_s
         if pd.isna(row["agreement_unit_price"]):
             return "—"
 
-        return f"{float(row['agreement_unit_price']):.2f} €/unité accord"
+        return f"{float(row['agreement_unit_price']):.2f}"
 
     # -----
 
     dataframe_transactions["Taux accord"] = dataframe_transactions.apply(_format_taux, axis=1)
+    dataframe_transactions["Unité accord"] = dataframe_transactions["agreement_unit"].fillna("—")
     dataframe_transactions.drop(
-        columns=["agreement_unit_price"],
+        columns=["agreement_unit_price", "agreement_unit"],
         inplace=True
     )
 

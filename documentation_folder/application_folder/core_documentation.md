@@ -317,14 +317,15 @@ for _, rule in param_mapping.iterrows():
 def parse_palier_column_name_method(param_column_name: str):
 ```
 
-**Ce que ça fait :** Analyse le nom d'une colonne `palier_*` du fichier mapping pour en extraire le groupe, le volume minimum et le volume maximum.
+**Ce que ça fait :** Analyse le nom d'une colonne `palier_*` du fichier mapping pour en extraire le groupe, le volume minimum, le volume maximum et l'unité de l'accord (déduite du suffixe de la colonne).
 
 **Formats reconnus :**
 
 | Nom de colonne | Résultat retourné |
 |---|---|
-| `palier_X_25000-35000_uvc` | `('X', 25000, 34999)` |
-| `palier_X_superior-40000_uvc` | `('X', 40000, None)` ← palier ouvert (pas de borne haute) |
+| `palier_X_25000-35000_uvc` | `('X', 25000, 34999, 'UVC')` |
+| `palier_X_superior-40000_uvc` | `('X', 40000, None, 'UVC')` ← palier ouvert (pas de borne haute) |
+| `palier_X_100-500_colis` | `('X', 100, 499, 'COLIS')` ← le suffixe fixe l'unité de l'accord |
 
 > **Note :** Le `- 1` sur `max_volume` est intentionnel : la colonne Excel nomme la borne haute en exclu (`25000-35000` signifie jusqu'à 34 999 inclus).
 
@@ -487,14 +488,16 @@ Hellmann's | Mayonnaise  | 0.10                     |
 
 1. **Lecture et détection des colonnes `palier_*`** : toutes les colonnes dont le nom commence par `palier_` sont collectées.
 2. **Détection du `palier_group`** : pour chaque ligne, on parse les colonnes `palier_*` pour extraire le nom du groupe (ex : `"X"` dans `palier_X_25000-35000_uvc`).
-3. **Alimentation des tables de référence** : les marques, catégories, l'unité `UVC` et l'industriel `UNILEVER FOODSOLUTIONS` sont créés si absents.
+3. **Alimentation des tables de référence** : les marques, catégories et l'industriel `UNILEVER FOODSOLUTIONS` sont créés si absents. Les unités sont créées dynamiquement à partir du suffixe des colonnes `palier_*` de chaque groupe (ex : `_uvc` → `UVC`, `_colis` → `COLIS`) — `UVC` reste créée par défaut pour les accords sans `palier_group` détecté.
+
+   > **Piège évité** : `id_industrial` et les ID d'unité sont récupérés directement depuis la valeur de retour de `get_or_create()` / `get_or_create_many()`, **pas** en relisant la table puis en filtrant en Python. La base utilise une collation insensible à la casse (`utf8mb4_general_ci`) : si `import_transactions()` a déjà inséré `"Unilever Foodsolutions"` (mis en forme via `.str.title()`), une comparaison de chaînes Python contre la constante `"UNILEVER FOODSOLUTIONS"` ne la retrouve pas alors que SQL, lui, la trouve. Utiliser directement le retour de `get_or_create` contourne le problème.
 4. **Suppression de tous les accords existants** :
    ```python
    connection.execute(text("DELETE FROM agreement"))
    ```
    - Les paliers (`agreement_tier`) sont supprimés en cascade (contrainte `ON DELETE CASCADE`).
    - Les transactions pointant vers ces accords passent à `fk_id_agreement = NULL` (contrainte `ON DELETE SET NULL`).
-5. **Insertion des nouveaux accords** : un accord par couple `(brand, category)` unique.
+5. **Insertion des nouveaux accords** : un accord par couple `(brand, category)` unique. `fk_id_unit` est déterminé par l'unité du `palier_group` de l'accord (`UVC` par défaut si aucun groupe n'est détecté).
 6. **Insertion des paliers** : pour chaque accord, on parcourt les colonnes `palier_*` correspondant au même `palier_group` et on insère les lignes dans `agreement_tier`.
 
 > **Après cet import**, il faut toujours appeler `resolve_agreements_method()` pour que les transactions qui sont passées à `NULL` retrouvent leur accord.
@@ -725,7 +728,7 @@ dataframe_totaux.to_excel(writer, sheet_name="Résumé", index=False, startrow=s
 ```
 
 **Feuille "Transactions" :**
-- Toutes les transactions de la base avec : nom produit, description, marque, catégorie, distributeur, fournisseur, quantité, prix unitaire, prix total, date, taux accord, statut mapping.
+- Toutes les transactions de la base avec : nom produit, description, marque, catégorie, distributeur, fournisseur, quantité, prix unitaire, prix total, unité de transaction, date, taux accord, unité accord, statut mapping.
 
 ```python
 CASE
@@ -735,7 +738,16 @@ END AS mapping_status
 ```
 - Une transaction sans accord est marquée `'Sans accord'` (le produit n'a pas été résolu par le mapping).
 
-**Formatage du taux accord :**
+- La colonne **"Unité accord"** vient de `product_conversion.agreement_unit`, retrouvé via un `LEFT JOIN` sur la clé métier `(distributor_name, product_code, transaction_unit)` — la même clé que celle utilisée dans `calculation_file.py` pour le facteur de conversion :
+  ```sql
+  LEFT JOIN product_conversion
+      ON  product_conversion.distributor_name = distributor.distributor_name
+      AND product_conversion.product_code     = product.product_code
+      AND product_conversion.transaction_unit = unit.unit_name
+  ```
+  Colonne informative, sans influence sur le calcul : saisie manuelle du client dans `table_correspondance.xlsx`. Même statut pour `agreement.fk_id_unit`, utilisé uniquement pour l'affichage dans l'onglet "Accords" (`consultation_file.py`). Sans correspondance dans `product_conversion`, la valeur affichée est `"—"`.
+
+**Formatage du taux accord et de l'unité accord :**
 ```python
 def _format_taux(row):
     """ Formatage du taux d'accord pour l'affichage dans le fichier Excel """
@@ -743,7 +755,11 @@ def _format_taux(row):
     if pd.isna(row["agreement_unit_price"]):
         return "—"
 
-    return f"{float(row['agreement_unit_price']):.2f} €/unité accord"
+    return f"{float(row['agreement_unit_price']):.2f}"
+
+# -----
+
+dataframe_transactions["Unité accord"] = dataframe_transactions["agreement_unit"].fillna("—")
 ```
 
 ---
