@@ -729,6 +729,9 @@ def import_agreements(param_file_path: str, param_progress_callback=None) -> dic
     def _detect_palier_group(param_row):
         """ Détecte le palier_group depuis les colonnes palier_* (ex : 'knorr', 'dressing+maizena+TVB') """
 
+        # On détecte s'il y a une valeur dans la colonne palier_*
+        # Si oui, on parse le nom de la colonne pour extraire le palier_group
+        # Si non, on teste la colonne suivante jusqu'à trouver un palier_group
         for column in palier_columns:
             if pd.notna(param_row.get(column)):
                 parsed = parse_palier_column_name_method(column)
