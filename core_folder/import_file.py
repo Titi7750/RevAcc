@@ -353,6 +353,8 @@ def import_transactions(
     datasource_id_map = dict(zip(database_datasource_reference["data_source_name"], database_datasource_reference["id_data_source"].astype(int)))
 
     # product_name → category_name depuis le mapping (fruit du keyword matching)
+    # Création d'un dictionnaire pour un accès rapide aux catégories par product_name
+    # {"product_name": "category_name"}
     product_name_to_category: dict = {
         str(mapping_row["product_name"]): str(mapping_row["categories"])
         for _, mapping_row in mapping_keywords.iterrows()
@@ -379,10 +381,10 @@ def import_transactions(
         product_code = str(product_row.get("product_code", ""))
         description = str(product_row.get("description",  ""))
         data_source = str(product_row.get("data_source",  ""))
-        key = (product_code, description, data_source)
+        product_key = (product_code, description, data_source)
 
         # Si le produit existe déjà en base, on ne l'insère pas
-        if key in existing_keys:
+        if product_key in existing_keys:
             continue
 
         # On récupère les noms de marque, catégorie, unité et source de données pour résoudre les FK
@@ -399,7 +401,7 @@ def import_transactions(
         category_name = product_name_to_category.get(product_name) if product_name else None
         id_category = category_id_map.get(category_name) if category_name else category_id_map.get("Non catégorisé")
 
-        # ⚠️ ATTENTION : si une FK n'a pas pu être résolue (brand/catégorie/unit/data_source introuvable)
+        # ATTENTION : si une FK n'a pas pu être résolue (brand/catégorie/unit/data_source introuvable)
         # le produit est ignoré silencieusement
         # Il ne sera jamais inséré en base → les transactions liées à ce produit seront également
         # ignorées (skippées dans la boucle d'insertion des transactions) et n'apparaîtront
