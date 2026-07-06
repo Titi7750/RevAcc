@@ -19,7 +19,14 @@ from core_folder.database_file import get_connection
 # -----
 
 def load_consultation_products_method() -> list:
-    """ Retourne les lignes pour l'onglet Produits de la consultation : id, nom, marque - catégorie, unité, statut """
+    """
+    Retourne les lignes pour l'onglet Produits de la consultation : id, nom, marque - catégorie, unité, statut
+
+    On peut avoir 3 statuts :
+        - "Sans transaction" : le produit n'a jamais été utilisé dans une transaction
+        - "À corriger" : le produit a été utilisé dans une transaction mais n'a pas d'accord associé
+        - "OK" : le produit a été utilisé dans une transaction et a un accord associé
+    """
 
     with get_connection() as connection:
         rows = connection.execute(
@@ -90,16 +97,16 @@ def load_all_transactions_method() -> list:
         rows = connection.execute(text(
             """
             SELECT
-                COALESCE(CAST(transaction.transaction_date AS CHAR), '') AS transaction_date,
-                COALESCE(distributor.distributor_name, '')               AS distributor_name,
-                COALESCE(product.product_name, '')                       AS product_name,
+                COALESCE(product.product_code, '')         AS product_code,
+                COALESCE(distributor.distributor_name, '') AS distributor_name,
+                COALESCE(product.product_name, '')         AS product_name,
                 transaction.quantity,
                 transaction.unit_price,
                 transaction.total_price
             FROM transaction
             LEFT JOIN distributor ON distributor.id_distributor = transaction.fk_id_distributor
             LEFT JOIN product     ON product.id_product         = transaction.fk_id_product
-            ORDER BY transaction.transaction_date DESC, transaction.id_transaction DESC
+            ORDER BY product.product_code
             """
         )).fetchall()
 

@@ -67,7 +67,7 @@ class GuiConsultationPageClass(QWidget):
             ["Industriel", "Marque - Catégorie", "Taux"]
         )
         self.table_consult_transactions = self.make_table_method(
-            ["Date", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"]
+            ["Code produit", "Distributeur", "Produit", "Quantité", "Prix unit.", "Total"]
         )
 
         # Onglets référentiels

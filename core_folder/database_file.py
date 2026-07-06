@@ -90,6 +90,7 @@ def get_or_create_many(param_connection, param_table: str, param_column_name: st
 
     # On dédoublonne d'abord pour n'appeler get_or_create qu'une fois par valeur distincte
     # (ex : si 500 transactions ont le même distributeur, on ne fait qu'un seul SELECT/INSERT)
+    # Un set ne peut pas contenir de doublons — 500 fois "Pomona" devient une seule valeur "Pomona"
     unique_values = {value for value in param_values if value is not None and str(value) not in ("", "nan")}
 
     return {value: get_or_create(param_connection, param_table, param_column_name, value) for value in unique_values}
