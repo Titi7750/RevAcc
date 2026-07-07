@@ -53,7 +53,7 @@ class ImportWorker(QThread):
     # -----
 
     def run(self) -> None:
-        """ Exécution de l'import dans le thread (appelé automatiquement par QThread.start) """
+        """ Exécution de l'import dans le thread (appelé automatiquement par QThread.start) - Emit sert à communiquer avec l'interface """
 
         try:
             # Choix de la fonction selon le type d'import

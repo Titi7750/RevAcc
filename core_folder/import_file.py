@@ -148,7 +148,10 @@ def find_product_name_method(param_row: pd.Series, param_mapping: pd.DataFrame) 
 
         # Compter le nombre de mots-clés présents dans la description normalisée
         # Avec le in operator, on peut trouver des correspondances singulier/pluriel (ex : "SEAU" dans "SEAUX")
-        matched = sum(1 for keyword_other in keywords_others if keyword_other in description_norm)
+        matched = 0
+        for keyword_other in keywords_others:
+            if keyword_other in description_norm:
+                matched += 1
 
         if matched > 0 and matched > best_score:
             best_score        = matched
