@@ -256,6 +256,7 @@ def import_transactions(
     dataframe["product_code"] = dataframe["product_code"].str.upper().replace(RAW_CODE_MAP)
 
     # Détection de la marque depuis la description et le code produit
+    # On test ligne par ligne les marques, là où True → on remplace la colonne brand par la marque détectée
     for brand_keyword in DESCRIPTION_BRAND_KEYWORDS:
         mask = (
             dataframe["description"].str.contains(brand_keyword, case=False, na=False) |
